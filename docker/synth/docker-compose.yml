@@ -1,0 +1,19 @@
+version: "2.4"
+
+services:
+  fluidsynth:
+    image: docker.io/geurto/generative-sequencer:synth
+    privileged: true
+    network_mode: host
+    restart: always
+    ipc: host
+    pid: host
+    command: ["fluidsynth",
+              "-a", "pulseaudio",
+              "-m", "alsa_seq",
+              "-l",
+              "-i", "/usr/local/bin/soundfonts/super-saw.sf2",
+              "-s",
+              "-o", "audio.driver=pulseaudio",
+              "-o", "midi.autoconnect=1",
+              "-o", "shell.port=9800"]
