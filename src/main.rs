@@ -1,11 +1,15 @@
 // src/main.rs
 mod playback;
+mod markov_notes;
+mod structs;
 
 use midir::MidiOutput;
 use tokio::sync::mpsc;
 use std::{error::Error, time::Duration};
-use playback::{start_playback_loop, Input};
-use crate::playback::Sequence;
+
+use playback::start_playback_loop;
+use markov_notes::{generate_sequence, initiate_chain};
+use crate::structs::{Input, Sequence};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -25,23 +29,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         duration: vec![500; 8],
     };
 
-    // Example of sending inputs
-    tx.send(Input::Bpm(140.0)).await.unwrap();
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    sequence.pitch = vec![72, 71, 69, 67, 65, 64, 62, 60];
-    tx.send(Input::Sequence(sequence.clone())).await.unwrap();
-
-    tokio::time::sleep(Duration::from_secs(5)).await;
-    sequence.velocity = vec![100, 70, 60, 50, 100, 70, 60, 50];
-    tx.send(Input::Sequence(sequence.clone())).await.unwrap();
-
-    tokio::time::sleep(Duration::from_secs(5)).await;
-    sequence.duration = vec![500, 250, 250, 125, 500, 500, 250, 125];
-    tx.send(Input::Sequence(sequence.clone())).await.unwrap();
+    let chain = initiate_chain();
 
     // This loop keeps the main function alive
     loop {
-        tokio::time::sleep(Duration::from_secs(3600)).await;
+        let new_sequence = generate_sequence(&chain, 8, "major", "C");
+        tx.send(Input::Sequence(new_sequence)).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }

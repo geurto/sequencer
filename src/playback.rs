@@ -5,22 +5,7 @@ use tokio::time::{self, Duration};
 use midir::{MidiOutputConnection};
 use std::error::Error;
 
-#[derive(Clone, Debug)]
-pub struct Sequence {
-    pub pitch: Vec<u8>,
-    pub velocity: Vec<u8>,
-    pub duration: Vec<u16>,
-}
-
-pub struct PlaybackState {
-    pub bpm: f32,
-    pub sequence: Sequence,
-}
-
-pub enum Input {
-    Bpm(f32),
-    Sequence(Sequence),
-}
+use crate::structs::*;
 
 pub async fn start_playback_loop(
     mut conn_out: MidiOutputConnection,
