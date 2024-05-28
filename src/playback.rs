@@ -5,10 +5,11 @@ use tokio::time::{self, Duration};
 use midir::{MidiOutputConnection};
 use std::error::Error;
 
-use crate::structs::*;
+use crate::common::*;
+use crate::midi::MidiHandler;
 
 pub async fn start_playback_loop(
-    mut conn_out: MidiOutputConnection,
+    mut midi_handler: MidiHandler,
     _tx: mpsc::Sender<Input>,
     rx: mpsc::Receiver<Input>,
 ) -> Result<(), Box<dyn Error>> {
@@ -31,9 +32,9 @@ pub async fn start_playback_loop(
                 let duration = Duration::from_millis(state.sequence.duration[i] as u64);
                 let velocity = state.sequence.velocity[i];
                 println!("Playing note: {}", note);
-                conn_out.send(&[0x90, note, velocity]).expect("Failed to send NOTE ON");  // Note on
+                midi_handler.send_note_on(note, velocity).expect("Failed to send NOTE ON");  // Note on
                 time::sleep(duration).await;
-                conn_out.send(&[0x80, note, 0]).expect("Failed to send NOTE OFF"); // Note off
+                midi_handler.send_note_off(note).expect("Failed to send NOTE OFF"); // Note off
             }
         }
     });

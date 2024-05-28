@@ -1,39 +1,34 @@
-// src/main.rs
 mod playback;
-mod markov_notes;
-mod structs;
+mod sequencers;
+mod common;
+mod midi;
+mod input;
 
-use midir::MidiOutput;
 use tokio::sync::mpsc;
 use std::{error::Error, time::Duration};
-
-use playback::start_playback_loop;
-use markov_notes::{generate_sequence, initiate_chain};
-use crate::structs::{Input, Sequence};
+use crate::common::{Input, Sequence};
+use crate::midi::MidiHandler;
+use crate::sequencers::markov::MarkovSequencer;
+use crate::sequencers::euclidean::EuclideanSequencer;
+use crate::sequencers::Sequencer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let midi_out = MidiOutput::new("My MIDI Output")?;
-    let out_ports = midi_out.ports();
-    let out_port = out_ports.get(0).ok_or("No MIDI output ports available.")?;
-    println!("Connecting to {}", midi_out.port_name(out_port)?);
-    let conn_out = midi_out.connect(out_port, "midir-test")?;
-
+    let mut midi_handler = MidiHandler::new()?;
     let (tx, rx) = mpsc::channel(32);
 
-    start_playback_loop(conn_out, tx.clone(), rx).await?;
+    playback::start_playback_loop(midi_handler, tx.clone(), rx).await?;
 
-    let mut sequence: Sequence = Sequence {
-        pitch: vec![60, 62, 64, 65, 67, 69, 71, 72],
-        velocity: vec![100; 8],
-        duration: vec![500; 8],
-    };
+    // let sequencer = MarkovSequencer::new();
+    let sequencer = EuclideanSequencer::new(16, 7, 60);
 
-    let chain = initiate_chain();
+    let tx_clone = tx.clone();
+    tokio::spawn(async move {
+        input::handle_user_input(tx_clone).await;
+    });
 
-    // This loop keeps the main function alive
     loop {
-        let new_sequence = generate_sequence(&chain, 8, "major", "C");
+        let new_sequence = sequencer.generate_sequence(16);
         tx.send(Input::Sequence(new_sequence)).await.unwrap();
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
