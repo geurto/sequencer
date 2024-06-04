@@ -35,6 +35,5 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         let new_sequence = sequencer.generate_sequence(16).await;
         tx.send(Input::Sequence(new_sequence)).await.unwrap();
-        tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }

@@ -30,7 +30,7 @@ pub async fn start_playback_loop(
             }
 
             let state = shared_state.lock().await;
-            println!("Playing sequence {:?} at {} BPM", state.sequence, state.bpm);
+            println!("Playing {:?}", state);
             for i in 0..state.sequence.notes.len() {
                 let pitch = state.sequence.notes[i].pitch;
                 let duration = Duration::from_millis(state.sequence.notes[i].duration as u64);

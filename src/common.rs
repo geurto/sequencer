@@ -1,3 +1,5 @@
+use std::fmt::{Debug, Formatter};
+
 pub enum NoteDuration {
     Sixteenth = 1,
     Eighth = 2,
@@ -49,6 +51,10 @@ impl Sequence {
         Sequence { notes }
     }
 
+    pub fn empty() -> Self {
+        Sequence { notes: vec![] }
+    }
+
     pub fn clear(&mut self) {
         self.notes.clear();
     }
@@ -57,6 +63,40 @@ impl Sequence {
 pub struct SharedState {
     pub bpm: f32,
     pub sequence: Sequence,
+}
+
+impl SharedState {
+    fn midi_to_note_name(pitch: u8) -> String {
+        let note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        let octave = (pitch / 12) as i8 - 1;
+        let note = note_names[(pitch % 12) as usize];
+        format!("{}{}", note, octave)
+    }
+
+    fn duration_to_symbol(duration: f32, bpm: f32) -> String {
+        let sixteenth_note_duration = 60000.0 / bpm / 4.0;
+        let num_sixteenth_notes = (duration / sixteenth_note_duration).round() as usize;
+        "-".repeat(num_sixteenth_notes)
+    }
+}
+
+impl Debug for SharedState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut result = String::new();
+        result.push_str(&format!("BPM: {} | Sequence: ", self.bpm));
+
+        for note in &self.sequence.notes {
+            let note_name = if note.pitch == 0 {
+                " ".to_string()
+            } else {
+                SharedState::midi_to_note_name(note.pitch)
+            };
+            let duration_symbol = SharedState::duration_to_symbol(note.duration, self.bpm);
+            result.push_str(&format!("{}{}, ", note_name, duration_symbol));
+        }
+
+        result.fmt(f)
+    }
 }
 
 pub enum Input {

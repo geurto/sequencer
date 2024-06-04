@@ -36,7 +36,7 @@ impl EuclideanSequencer {
 
 impl Sequencer for EuclideanSequencer {
     async fn generate_sequence(&self, length: usize) -> Sequence {
-        let mut sequence = Sequence::default();
+        let mut sequence = Sequence::empty();
 
         if self.pulses == 0 {
             // Handle zero pulses case
@@ -50,7 +50,7 @@ impl Sequencer for EuclideanSequencer {
             .map(|i| (i * self.steps) / self.pulses)
             .collect::<Vec<_>>();
 
-        for i in 0..length - 1 {
+        for i in 0..length {
             let note = if beat_locations.contains(&(i % self.steps)) {
                 Note::new(self.pitch, 100, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm)
             } else {
