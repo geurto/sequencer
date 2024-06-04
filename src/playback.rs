@@ -10,16 +10,25 @@ use crate::midi::MidiHandler;
 pub async fn start_playback_loop(
     mut midi_handler: MidiHandler,
     _tx: mpsc::Sender<Input>,
-    rx: mpsc::Receiver<Input>,
+    mut rx: mpsc::Receiver<Input>,
     shared_state: Arc<Mutex<SharedState>>
 ) -> Result<(), Box<dyn Error>> {
-    let state = Arc::new(Mutex::new(SharedState {
-        bpm: 120.0,
-        sequence: Sequence::default(),
-    }));
-
     tokio::spawn(async move {
         loop {
+            if let Some(input) = rx.recv().await {
+                let mut state = shared_state.lock().await;
+                match input {
+                    Input::Bpm(bpm) => {
+                        println!("Changing BPM to {}", bpm);
+                        state.bpm = bpm;
+                    }
+                    Input::Sequence(sequence) => {
+                        println!("Changing sequence");
+                        state.sequence = sequence;
+                    }
+                }
+            }
+
             let state = shared_state.lock().await;
             println!("Playing sequence {:?} at {} BPM", state.sequence, state.bpm);
             for i in 0..state.sequence.notes.len() {
@@ -30,24 +39,6 @@ pub async fn start_playback_loop(
                 midi_handler.send_note_on(pitch, velocity).expect("Failed to send NOTE ON");  // Note on
                 time::sleep(duration).await;
                 midi_handler.send_note_off(pitch).expect("Failed to send NOTE OFF"); // Note off
-            }
-        }
-    });
-
-    let playback_state = Arc::clone(&state);
-    tokio::spawn(async move {
-        let mut rx = rx;
-        while let Some(input) = rx.recv().await {
-            let mut state = playback_state.lock().await;
-            match input {
-                Input::Bpm(bpm) => {
-                    println!("Changing BPM to {}", bpm);
-                    state.bpm = bpm;
-                }
-                Input::Sequence(sequence) => {
-                    println!("Changing sequence");
-                    state.sequence = sequence;
-                }
             }
         }
     });

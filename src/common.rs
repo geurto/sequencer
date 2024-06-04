@@ -48,6 +48,10 @@ impl Sequence {
         notes.push(Note::new(0, 0, NoteDuration::Whole, 120.0));
         Sequence { notes }
     }
+
+    pub fn clear(&mut self) {
+        self.notes.clear();
+    }
 }
 
 pub struct SharedState {

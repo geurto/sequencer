@@ -50,13 +50,12 @@ impl Sequencer for EuclideanSequencer {
             .map(|i| (i * self.steps) / self.pulses)
             .collect::<Vec<_>>();
 
-        for i in 0..length {
-            let note_pitch = if beat_locations.contains(&(i % self.steps)) {
-                self.pitch
+        for i in 0..length - 1 {
+            let note = if beat_locations.contains(&(i % self.steps)) {
+                Note::new(self.pitch, 100, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm)
             } else {
-                0
+                Note::new(0, 100, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm)
             };
-            let note = Note::new(note_pitch, 100, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm);
             sequence.notes.push(note);
         }
         sequence
