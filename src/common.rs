@@ -45,6 +45,7 @@ pub struct Sequence {
 impl Sequence {
     pub fn default() -> Self {
         let mut notes = vec![];
+        notes.push(Note::new(0, 0, NoteDuration::Whole, 120.0));
         Sequence { notes }
     }
 }
