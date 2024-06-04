@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+log = "0.4.21"
 markov = "1.1.0"
-midir = "0.9.1"
+midir = "0.10.0"
 tokio = { version = "1.36.0", features = ["full", "sync", "time"] }

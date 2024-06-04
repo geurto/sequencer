@@ -1,33 +1,47 @@
 use super::Sequencer;
-use crate::common::Sequence;
+use crate::common::{Note, NoteDuration, Sequence, SharedState};
+
+use log::warn;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
 
 pub struct EuclideanSequencer {
     steps: usize,
     pulses: usize,
     pitch: u8,
+    shared_state: Arc<Mutex<SharedState>>,
 }
 
 impl EuclideanSequencer {
-    pub fn new(steps: usize, pulses: usize, pitch: u8) -> Self {
+    pub fn new(steps: usize, pulses: usize, pitch: u8, shared_state: Arc<Mutex<SharedState>>) -> Self {
+        if pulses > steps {
+            warn!("Pulses cannot be greater than steps. Setting pulses to steps.");
+            return EuclideanSequencer {
+                steps,
+                pulses: steps,
+                pitch,
+                shared_state
+            };
+        }
+
         EuclideanSequencer {
             steps,
             pulses,
             pitch,
+            shared_state
         }
     }
 }
 
 impl Sequencer for EuclideanSequencer {
-    fn generate_sequence(&self, length: usize) -> Sequence {
-        let mut sequence = Sequence {
-            pitch: vec![],
-            velocity: vec![100; length],
-            duration: vec![500; length],
-        };
+    async fn generate_sequence(&self, length: usize) -> Sequence {
+        let mut sequence = Sequence::default();
 
         if self.pulses == 0 {
             // Handle zero pulses case
-            sequence.pitch = vec![0; length];
+            let note = Note::new(0, 100, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm);
+            sequence.notes.push(note);
             return sequence;
         }
 
@@ -42,7 +56,8 @@ impl Sequencer for EuclideanSequencer {
             } else {
                 0
             };
-            sequence.pitch.push(note_pitch);
+            let note = Note::new(note_pitch, 100, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm);
+            sequence.notes.push(note);
         }
         sequence
     }

@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 use crate::common::Input;
 
-pub async fn handle_user_input(tx: mpsc::Sender<Input>) {
+pub async fn handle_user_input(_tx: mpsc::Sender<Input>) {
     loop {
         if button_pressed() {}
 
