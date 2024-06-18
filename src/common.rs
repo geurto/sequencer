@@ -63,9 +63,20 @@ impl Sequence {
 pub struct SharedState {
     pub bpm: f32,
     pub sequence: Sequence,
+    pub clock_ticks: u32,
+    pub quarter_notes: u32,
 }
 
 impl SharedState {
+    pub fn new(bpm: f32) -> Self {
+        SharedState {
+            bpm,
+            sequence: Sequence::default(),
+            clock_ticks: 0,
+            quarter_notes: 0,
+        }
+    }
+
     fn midi_to_note_name(pitch: u8) -> String {
         let note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
         let octave = (pitch / 12) as i8 - 1;

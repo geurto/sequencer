@@ -17,10 +17,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let midi_handler = MidiHandler::new()?;
     let (tx, rx) = mpsc::channel(32);
 
-    let shared_state = Arc::new(Mutex::new(SharedState {
-        bpm: 120.0,
-        sequence: Sequence::default(),
-    }));
+    let shared_state = Arc::new(Mutex::new(SharedState::new(120.0)));
 
     playback::start_playback_loop(midi_handler, tx.clone(), rx, shared_state.clone()).await?;
 
