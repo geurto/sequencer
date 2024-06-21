@@ -1,0 +1,1 @@
+ttymidi -s /dev/ttyAMA0 -b 38400 &

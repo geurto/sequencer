@@ -113,4 +113,5 @@ impl Debug for SharedState {
 pub enum Input {
     Bpm(f32),
     Sequence(Sequence),
+    Shutdown,
 }

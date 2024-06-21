@@ -1,0 +1,11 @@
+version: "2.4"
+
+services:
+  sequencer:
+    image: docker.io/geurto/generative-sequencer:sequencer
+    privileged: true
+    network_mode: host
+    restart: always
+    ipc: host
+    pid: host
+    command: ["sleep", "infinity"]
