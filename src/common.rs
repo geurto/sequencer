@@ -1,4 +1,6 @@
 use std::fmt::{Debug, Formatter};
+use crate::sequencers::euclidean::EuclideanSequencerInput;
+use crate::sequencers::markov::MarkovSequencerInput;
 
 pub enum NoteDuration {
     Sixteenth = 1,
@@ -61,6 +63,7 @@ impl Sequence {
 }
 
 pub struct SharedState {
+    pub playing: bool,
     pub bpm: f32,
     pub sequence: Sequence,
     pub clock_ticks: u32,
@@ -70,6 +73,7 @@ pub struct SharedState {
 impl SharedState {
     pub fn new(bpm: f32) -> Self {
         SharedState {
+            playing: false,
             bpm,
             sequence: Sequence::default(),
             clock_ticks: 0,
@@ -114,4 +118,9 @@ pub enum Input {
     Bpm(f32),
     Sequence(Sequence),
     Shutdown,
+    TogglePlayback,
+    IncreaseBpm,
+    DecreaseBpm,
+    Euclidean(EuclideanSequencerInput),
+    Markov(MarkovSequencerInput),
 }

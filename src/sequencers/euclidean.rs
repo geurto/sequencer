@@ -1,10 +1,9 @@
 use super::Sequencer;
 use crate::common::{Note, NoteDuration, Sequence, SharedState};
 
-use log::warn;
+use log::{info, warn};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
 
 pub struct EuclideanSequencer {
     steps: usize,
@@ -31,6 +30,34 @@ impl EuclideanSequencer {
             pitch,
             shared_state
         }
+    }
+
+    pub async fn increase_steps(&mut self) {
+        if self.steps < 16 {
+            self.steps += 1;
+        }
+        info!("Steps: {}", self.steps);
+    }
+
+    pub async fn decrease_steps(&mut self) {
+        if self.steps > 1 {
+            self.steps -= 1;
+        }
+        info!("Steps: {}", self.steps);
+    }
+
+    pub async fn increase_pulses(&mut self) {
+        if self.pulses < 16 {
+            self.pulses += 1;
+        }
+        info!("Pulses: {}", self.pulses);
+    }
+
+    pub async fn decrease_pulses(&mut self) {
+        if self.pulses > 1 {
+            self.pulses -= 1;
+        }
+        info!("Pulses: {}", self.pulses);
     }
 }
 
@@ -60,4 +87,15 @@ impl Sequencer for EuclideanSequencer {
         }
         sequence
     }
+}
+
+pub enum EuclideanSequencerInput {
+    IncreaseSteps,
+    DecreaseSteps,
+    IncreasePulses,
+    DecreasePulses,
+    IncreasePitch,
+    DecreasePitch,
+    IncreaseOctave,
+    DecreaseOctave,
 }

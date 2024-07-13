@@ -18,6 +18,7 @@ use crate::sequencers::Sequencer;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     Builder::new().filter(None, log::LevelFilter::Debug).init();
+
     let mut midi_handler = MidiHandler::new()?;
     let (tx, rx) = mpsc::channel(32);
 
@@ -26,13 +27,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     playback::start_playback_loop(midi_handler, tx.clone(), rx, shared_state.clone()).await?;
 
-    let _sequencer = MarkovSequencer::new(shared_state.clone());
-    let sequencer = EuclideanSequencer::new(16, 7, 60, shared_state.clone());
+    let markov_sequencer = MarkovSequencer::new(shared_state.clone());
+    let euclidean_sequencer = EuclideanSequencer::new(16, 7, 60, shared_state.clone());
 
-    let tx_input = tx.clone();
-    tokio::spawn(async move {
-        input::handle_user_input(tx_input).await;
-    });
+    input::spawn_input_handler(tx.clone());
 
     let tx_ctrlc = tx.clone();
     ctrlc::set_handler(move || {
@@ -43,7 +41,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }).expect("Error setting Ctrl-C handler");
 
     loop {
-        let new_sequence = sequencer.generate_sequence(16).await;
+        let new_sequence = euclidean_sequencer.generate_sequence(16).await;
         tx.send(Input::Sequence(new_sequence)).await.unwrap();
     }
 }

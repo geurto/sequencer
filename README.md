@@ -1,18 +1,24 @@
-Make sure that Docker containers can connect to PulseAudio. 
-Add the following lines to your /etc/pulse/default.pa file:
+# Generative Sequencer (needs a cooler name)
+This is a collection of generative sequencers, written in Rust. Use it to send MIDI notes to your synthesizer or DAW.
+Sequencers currently supported:
+- Euclidean
+- Markov Chain
 
-```
-`# Allow Docker containers to connect with PulseAudio
-load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1;172.17.0.0/16 auth-anonymous=1
-load-module module-esound-protocol-tcp
-```
+## Use
+To operate the sequencer, you can attach a keyboard to whatever device is running this code, e.g. a Raspberry Pi. 
 
+### Common keyboard shortcuts
+The common keyboard shortcuts are:
+- `SPACE` to start/stop the sequencer
 
-Then restart PulseAudio:
+### Euclidean sequencer keyboard shortcuts
+- `UP` to increase the number of steps by 1
+- `DOWN` to decrease the number of steps by 1
+- `LEFT` to decrease the number of pulses by 1
+- `RIGHT` to increase the number of pulses by 1
+- `W` to increase the MIDI note by 1
+- `S` to decrease the MIDI note by 1
+- `A` to decrease the MIDI note by one octave
+- `D` to increase the MIDI note by one octave
 
-`pulseaudio -k && pulseaudio --start`
-
-Or, because connecting to PulseAudio over a Docker container does not work so far, 
-just use the following command in your terminal so at least the Rust code produces a sound:
-
-`fluidsynth -a pulseaudio -m alsa_seq -l -i /usr/local/bin/soundfonts/super-saw.sf2 -s -o audio.driver=pulseaudio -o midi.autoconnect=1 -o shell.port=9800`
+### Markov Chain sequencer keyboard shortcuts

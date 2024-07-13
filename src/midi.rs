@@ -1,10 +1,9 @@
 use crate::common::SharedState;
 
 use log::{info, warn};
-use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection, MidiOutputPort};
+use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use std::error::Error;
 use std::sync::Arc;
-use throttle::Throttle;
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 
@@ -24,7 +23,7 @@ impl MidiHandler {
         }
 
         let out_ports_ttymidi = out_ports.iter().filter(|p| midi_out.port_name(p).unwrap().contains("ttymidi")).collect::<Vec<_>>();
-        let mut out_port;
+        let out_port;
         if out_ports_ttymidi.is_empty() {
             warn!("No ttymidi output ports available.");
             out_port = out_ports.get(0).ok_or("No MIDI output ports available.")?;
