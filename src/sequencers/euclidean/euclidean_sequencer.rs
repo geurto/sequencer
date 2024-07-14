@@ -59,21 +59,18 @@ impl Sequencer for EuclideanSequencer {
                 debug!("Euclidean sequencer received config: {:?}", config);
                 self.config = config;
                 let sequence = self.generate_sequence().await;
-                match sequencer_slot {
-                    0 => {
-                        self.shared_state.lock().await.mixer_config.sequence_a = sequence;
-                    }
-                    1 => {
-                        self.shared_state.lock().await.mixer_config.sequence_b = sequence;
-                    }
-                    _ => {
-                        panic!("Invalid sequencer slot");
+                {
+                    let mut state = self.shared_state.lock().await;
+                    match sequencer_slot {
+                        0 => state.mixer_config.sequence_a = sequence,
+                        1 => state.mixer_config.sequence_b = sequence,
+                        _ => panic!("Invalid sequencer slot"),
                     }
                 }
                 self.mixer_update_tx.send(()).await?;
             }
 
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     }
 }

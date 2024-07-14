@@ -39,8 +39,8 @@ async fn main() -> Result<(), Error> {
     let shared_state = Arc::new(Mutex::new(SharedState::new(120.0)));
 
     // MIDI input and output
-    let mut midi_handler = MidiHandler::new()?;
-    midi_handler.setup_midi_input(shared_state.clone()).await?;
+    let midi_handler = Arc::new(Mutex::new(MidiHandler::new()?));
+    midi_handler.lock().await.setup_midi_input(shared_state.clone()).await?;
 
     let tx_ctrlc = tx_input.clone();
     let tx_shutdown_ctrlc = tx_shutdown.clone();
@@ -79,13 +79,16 @@ async fn main() -> Result<(), Error> {
 
     // Input handling
     input::spawn_input_handler(tx_input.clone());
+    let shared_state_input = shared_state.clone();
     tokio::spawn(async move {
-        input::process_input(rx_input, shared_state.clone(), sequencer_channels).await;
+        input::process_input(rx_input, shared_state_input, sequencer_channels).await;
     });
 
     // Playback
+    let shared_state_playback = shared_state.clone();
+    let midi_handler_clone = midi_handler.clone();
     tokio::spawn(async move {
-        playback::play(midi_handler, shared_state.clone()).await.unwrap();
+        playback::play(midi_handler_clone, shared_state_playback).await.unwrap();
     });
 
     tokio::select! {

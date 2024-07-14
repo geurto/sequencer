@@ -83,7 +83,7 @@ impl Debug for Sequence {
                 Sequence::midi_to_note_name(note.pitch)
             };
             let duration_symbol = Sequence::duration_to_symbol(note.duration, total_duration);
-            result.push_str(&format!("{}{}, ", note_name, duration_symbol));
+            result.push_str(&format!("{}{}", note_name, duration_symbol));
         }
 
         result.fmt(f)
