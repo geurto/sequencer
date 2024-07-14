@@ -1,7 +1,5 @@
 use std::fmt::{Debug, Formatter};
-use tokio::sync::mpsc;
-use crate::sequencers::euclidean::{EuclideanSequencerConfig, EuclideanSequencerInput};
-use crate::sequencers::markov::{MarkovSequencerConfig, MarkovSequencerInput};
+use crate::state::SharedState;
 
 pub enum NoteDuration {
     Sixteenth = 1,
@@ -42,7 +40,7 @@ impl Note {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Sequence {
     pub notes: Vec<Note>,
 }
@@ -58,75 +56,36 @@ impl Sequence {
         Sequence { notes: vec![] }
     }
 
-    pub fn clear(&mut self) {
-        self.notes.clear();
-    }
-}
-
-pub struct SharedState {
-    pub playing: bool,
-    pub bpm: f32,
-    pub sequence: Sequence,
-    pub clock_ticks: u32,
-    pub quarter_notes: u32,
-}
-
-impl SharedState {
-    pub fn new(bpm: f32) -> Self {
-        SharedState {
-            playing: false,
-            bpm,
-            sequence: Sequence::default(),
-            clock_ticks: 0,
-            quarter_notes: 0,
-        }
-    }
-
     fn midi_to_note_name(pitch: u8) -> String {
         let note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
         let octave = (pitch / 12) as i8 - 1;
         let note = note_names[(pitch % 12) as usize];
-        format!("{}{}", note, octave)
+        format!("[{}{}]", note, octave)
     }
 
-    fn duration_to_symbol(duration: f32, bpm: f32) -> String {
-        let sixteenth_note_duration = 60000.0 / bpm / 4.0;
-        let num_sixteenth_notes = (duration / sixteenth_note_duration).round() as usize;
-        "-".repeat(num_sixteenth_notes)
+    fn duration_to_symbol(duration: f32, total_duration: f32) -> String {
+        let total_dashes = 40;
+        let num_dashes = (duration / total_duration * total_dashes as f32).round() as usize;
+        "-".repeat(num_dashes)
     }
 }
 
-impl Debug for SharedState {
+impl Debug for Sequence {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut result = String::new();
-        result.push_str(&format!("BPM: {} | Sequence: ", self.bpm));
+        result.push_str("Sequence: ");
+        let total_duration = self.notes.iter().map(|note| note.duration).sum::<f32>();
 
-        for note in &self.sequence.notes {
+        for note in &self.notes {
             let note_name = if note.pitch == 0 {
-                " ".to_string()
+                "[r]".to_string()
             } else {
-                SharedState::midi_to_note_name(note.pitch)
+                Sequence::midi_to_note_name(note.pitch)
             };
-            let duration_symbol = SharedState::duration_to_symbol(note.duration, self.bpm);
+            let duration_symbol = Sequence::duration_to_symbol(note.duration, total_duration);
             result.push_str(&format!("{}{}, ", note_name, duration_symbol));
         }
 
         result.fmt(f)
     }
-}
-
-pub struct SequencerChannels {
-    pub euclidean_tx: mpsc::Sender<EuclideanSequencerConfig>,
-    pub markov_tx: mpsc::Sender<MarkovSequencerConfig>,
-}
-
-pub enum Input {
-    Bpm(f32),
-    Sequence(Sequence),
-    Shutdown,
-    TogglePlayback,
-    IncreaseBpm,
-    DecreaseBpm,
-    Euclidean(EuclideanSequencerInput),
-    Markov(MarkovSequencerInput),
 }

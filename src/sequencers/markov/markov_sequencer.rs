@@ -1,23 +1,17 @@
 /// Creating a Sequence object from a Markov chain.
 /// Use scale degrees to start with: tonic, dominant, etc. (1-7)
 /// I: tonic, II: supertonic, III: mediant, IV, subdominant, V: dominant, VI: submediant, VII: leading tone/subtonic
-use super::Sequencer;
+use anyhow::Error;
+use log::debug;
 use markov::Chain;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::common::{Note, NoteDuration, Sequence, SharedState};
-
-#[derive(Clone)]
-pub struct MarkovSequencerConfig {
-    pub root_note: u8,
-}
-
-impl MarkovSequencerConfig {
-    pub fn new() -> Self {
-        Self { root_note: 60 }
-    }
-}
+use crate::note::{Note, NoteDuration, Sequence};
+use crate::sequencers::traits::Sequencer;
+use crate::sequencers::markov::config::MarkovSequencerConfig;
+use crate::sequencers::mixer::config::MixerConfig;
+use crate::state::SharedState;
 
 pub struct MarkovSequencer {
     chain: Chain<u8>,
@@ -27,9 +21,11 @@ pub struct MarkovSequencer {
 }
 
 impl MarkovSequencer {
-    pub fn new(config_rx: mpsc::Receiver<MarkovSequencerConfig>, shared_state: Arc<Mutex<SharedState>>) -> Self {
-        let mut config = MarkovSequencerConfig::new();
+    pub fn new(config_rx: mpsc::Receiver<MarkovSequencerConfig>,
+               shared_state: Arc<Mutex<SharedState>>) -> Self {
+        let config = MarkovSequencerConfig::new();
         let mut chain = Chain::new();
+
         // from https://topmusicarts.com/blogs/news/5-most-used-chord-progressions-in-edm
         chain.feed(&[6, 4, 5, 1]);
         chain.feed(&[6, 5, 1, 4]);
@@ -50,20 +46,38 @@ impl MarkovSequencer {
 }
 
 impl Sequencer for MarkovSequencer {
-    async fn generate_sequence(&self, length: usize) -> Sequence {
+    async fn generate_sequence(&self) -> Sequence {
         let state = self.shared_state.lock().await;
         let mut sequence = Sequence::default();
         let degrees = self.chain.generate();
         let num_notes = degrees.len();
-        for i in 0..length {
+        for i in 0..self.config.steps {
             let note = Note::new(degrees[i % num_notes], 100, NoteDuration::Quarter, state.bpm);
             sequence.notes.push(note);
         }
         sequence
     }
-}
 
-pub enum MarkovSequencerInput {
-    Feed(Vec<u8>),
-    Generate,
+    async fn run(&mut self, sequencer_slot: usize) -> Result<(), Error> {
+        loop {
+            if let Some(config) = self.config_rx.recv().await {
+                debug!("Markov sequencer received config: {:?}", config);
+                self.config = config;
+                let sequence = self.generate_sequence().await;
+                match sequencer_slot {
+                    0 => {
+                        self.shared_state.lock().await.mixer_config.sequence_a = sequence;
+                    }
+                    1 => {
+                        self.shared_state.lock().await.mixer_config.sequence_b = sequence;
+                    }
+                    _ => {
+                        panic!("Invalid sequencer slot");
+                    }
+                }
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+    }
 }
