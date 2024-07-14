@@ -1,4 +1,3 @@
-// src/playback.rs
 use log::{debug, info};
 use tokio::sync::{mpsc, Mutex};
 use std::sync::Arc;
@@ -7,16 +6,20 @@ use std::error::Error;
 
 use crate::common::*;
 use crate::midi::MidiHandler;
-use crate::sequencers::euclidean::EuclideanSequencerInput;
-use crate::sequencers::markov::MarkovSequencerInput;
+use crate::sequencers::euclidean::{EuclideanSequencerConfig, EuclideanSequencerInput};
+use crate::sequencers::markov::{MarkovSequencerConfig, MarkovSequencerInput};
 
 pub async fn start_playback_loop(
     mut midi_handler: MidiHandler,
     _tx: mpsc::Sender<Input>,
     mut rx: mpsc::Receiver<Input>,
-    shared_state: Arc<Mutex<SharedState>>
+    shared_state: Arc<Mutex<SharedState>>,
+    sequencer_channels: SequencerChannels,
 ) -> Result<(), Box<dyn Error>> {
     info!("Starting playback loop");
+    let mut euclidean_config = EuclideanSequencerConfig::new();
+    let mut markov_config = MarkovSequencerConfig::new();
+
     tokio::spawn(async move {
         loop {
             if let Some(input) = rx.recv().await {
@@ -43,19 +46,37 @@ pub async fn start_playback_loop(
                     Input::Euclidean(euclidean_input) => {
                         match euclidean_input {
                             EuclideanSequencerInput::IncreaseSteps => {
-                                // Handle increasing steps in Euclidean sequencer
+                                euclidean_config.steps += 1;
                             },
                             EuclideanSequencerInput::DecreaseSteps => {
-                                // Handle decreasing steps in Euclidean sequencer
+                                euclidean_config.steps -= 1;
                             },
-                            // Handle other Euclidean inputs...
-                            _ => {}
+                            EuclideanSequencerInput::IncreasePulses => {
+                                euclidean_config.pulses += 1;
+                            },
+                            EuclideanSequencerInput::DecreasePulses => {
+                                euclidean_config.pulses -= 1;
+                            },
+                            EuclideanSequencerInput::IncreasePitch => {
+                                euclidean_config.pitch += 1;
+                            },
+                            EuclideanSequencerInput::DecreasePitch => {
+                                euclidean_config.pitch -= 1;
+                            },
+                            EuclideanSequencerInput::IncreaseOctave => {
+                                euclidean_config.pitch += 12;
+                            },
+                            EuclideanSequencerInput::DecreaseOctave => {
+                                euclidean_config.pitch -= 12;
+                            },
                         }
+                        sequencer_channels.euclidean_tx.send(euclidean_config.clone()).await.unwrap();
                     },
                     Input::Markov(markov_input) => {
                         match markov_input {
                             _ => {}
                         }
+                        sequencer_channels.markov_tx.send(markov_config.clone()).await.unwrap();
                     },
                 }
             }

@@ -1,6 +1,7 @@
 use std::fmt::{Debug, Formatter};
-use crate::sequencers::euclidean::EuclideanSequencerInput;
-use crate::sequencers::markov::MarkovSequencerInput;
+use tokio::sync::mpsc;
+use crate::sequencers::euclidean::{EuclideanSequencerConfig, EuclideanSequencerInput};
+use crate::sequencers::markov::{MarkovSequencerConfig, MarkovSequencerInput};
 
 pub enum NoteDuration {
     Sixteenth = 1,
@@ -112,6 +113,11 @@ impl Debug for SharedState {
 
         result.fmt(f)
     }
+}
+
+pub struct SequencerChannels {
+    pub euclidean_tx: mpsc::Sender<EuclideanSequencerConfig>,
+    pub markov_tx: mpsc::Sender<MarkovSequencerConfig>,
 }
 
 pub enum Input {
