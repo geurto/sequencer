@@ -35,5 +35,5 @@ impl SharedState {
 pub struct SequencerChannels {
     pub euclidean_tx: mpsc::Sender<EuclideanSequencerConfig>,
     pub markov_tx: mpsc::Sender<MarkovSequencerConfig>,
-    pub mixer_tx: mpsc::Sender<MixerConfig>,
+    pub mixer_tx: mpsc::Sender<()>,
 }

@@ -13,14 +13,16 @@ use tokio::sync::mpsc;
 pub struct EuclideanSequencer {
     config: EuclideanSequencerConfig,
     config_rx: mpsc::Receiver<EuclideanSequencerConfig>,
+    mixer_update_tx: mpsc::Sender<()>,
     shared_state: Arc<Mutex<SharedState>>,
 }
 
 impl EuclideanSequencer {
     pub fn new(config_rx: mpsc::Receiver<EuclideanSequencerConfig>,
+               mixer_update_tx: mpsc::Sender<()>,
                shared_state: Arc<Mutex<SharedState>>) -> Self {
         let mut config = EuclideanSequencerConfig::new();
-        EuclideanSequencer { config, config_rx, shared_state }
+        EuclideanSequencer { config, config_rx, mixer_update_tx, shared_state }
     }
 }
 
@@ -48,7 +50,7 @@ impl Sequencer for EuclideanSequencer {
             };
             sequence.notes.push(note);
         }
-        sequence
+         sequence
     }
 
     async fn run(&mut self, sequencer_slot: usize) -> Result<(), Error> {
@@ -68,6 +70,7 @@ impl Sequencer for EuclideanSequencer {
                         panic!("Invalid sequencer slot");
                     }
                 }
+                self.mixer_update_tx.send(()).await?;
             }
 
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;

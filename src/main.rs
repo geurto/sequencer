@@ -23,32 +23,24 @@ use crate::sequencers::traits::Sequencer;
 async fn main() -> Result<(), Error> {
     Builder::new().filter(None, log::LevelFilter::Debug).init();
 
-    let mut midi_handler = MidiHandler::new()?;
+    // tokio channels
     let (tx_input, rx_input) = mpsc::channel(1);
     let (tx_config_euclidean, rx_config_euclidean) = mpsc::channel(1);
     let (tx_config_markov, rx_config_markov) = mpsc::channel(1);
-    let (tx_config_mixer, rx_config_mixer) = mpsc::channel(1);
+    let (tx_update_mixer, rx_update_mixer) = mpsc::channel(1);
     let (tx_shutdown, mut rx_shutdown) = mpsc::channel(1);
 
     let sequencer_channels = SequencerChannels {
         euclidean_tx: tx_config_euclidean,
         markov_tx: tx_config_markov,
-        mixer_tx: tx_config_mixer,
+        mixer_tx: tx_update_mixer.clone(),
     };
 
     let shared_state = Arc::new(Mutex::new(SharedState::new(120.0)));
+
+    // MIDI input and output
+    let mut midi_handler = MidiHandler::new()?;
     midi_handler.setup_midi_input(shared_state.clone()).await?;
-
-    playback::start_playback_loop(midi_handler, shared_state.clone()).await?;
-
-    let mut sequencer_a = MarkovSequencer::new(rx_config_markov, shared_state.clone());
-    let mut sequencer_b = EuclideanSequencer::new(rx_config_euclidean, shared_state.clone());
-    let mut sequence_mixer = Mixer::new(rx_config_mixer);
-
-    input::spawn_input_handler(tx_input.clone());
-    tokio::spawn(async move {
-        input::process_input(rx_input, shared_state.clone(), sequencer_channels).await;
-    });
 
     let tx_ctrlc = tx_input.clone();
     let tx_shutdown_ctrlc = tx_shutdown.clone();
@@ -60,14 +52,40 @@ async fn main() -> Result<(), Error> {
         });
     })?;
 
+    // Sequencers and mixer
+    let mut sequencer_a  = EuclideanSequencer::new(
+        rx_config_euclidean,
+        tx_update_mixer.clone(),
+        shared_state.clone());
+    sequencer_a.generate_sequence().await;
     tokio::spawn(async move {
         sequencer_a.run(0).await.unwrap();
     });
+
+    let mut sequencer_b = MarkovSequencer::new(
+        rx_config_markov,
+        tx_update_mixer.clone(),
+        shared_state.clone());
+    sequencer_b.generate_sequence().await;
     tokio::spawn(async move {
         sequencer_b.run(1).await.unwrap();
     });
+
+    let mut sequence_mixer = Mixer::new(rx_update_mixer, shared_state.clone());
+    sequence_mixer.mix().await;
     tokio::spawn(async move {
         sequence_mixer.run().await;
+    });
+
+    // Input handling
+    input::spawn_input_handler(tx_input.clone());
+    tokio::spawn(async move {
+        input::process_input(rx_input, shared_state.clone(), sequencer_channels).await;
+    });
+
+    // Playback
+    tokio::spawn(async move {
+        playback::play(midi_handler, shared_state.clone()).await.unwrap();
     });
 
     tokio::select! {

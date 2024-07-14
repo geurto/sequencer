@@ -17,11 +17,13 @@ pub struct MarkovSequencer {
     chain: Chain<u8>,
     config: MarkovSequencerConfig,
     config_rx: mpsc::Receiver<MarkovSequencerConfig>,
+    mixer_update_tx: mpsc::Sender<()>,
     shared_state: Arc<Mutex<SharedState>>,
 }
 
 impl MarkovSequencer {
     pub fn new(config_rx: mpsc::Receiver<MarkovSequencerConfig>,
+               mixer_update_tx: mpsc::Sender<()>,
                shared_state: Arc<Mutex<SharedState>>) -> Self {
         let config = MarkovSequencerConfig::new();
         let mut chain = Chain::new();
@@ -41,7 +43,7 @@ impl MarkovSequencer {
         chain.feed(&[6, 1, 7, 5]);
         chain.feed(&[5, 4, 6, 1, 2, 1, 4]);
 
-        Self { chain, config, config_rx, shared_state }
+        Self { chain, config, config_rx, mixer_update_tx, shared_state }
     }
 }
 
@@ -75,6 +77,7 @@ impl Sequencer for MarkovSequencer {
                         panic!("Invalid sequencer slot");
                     }
                 }
+                self.mixer_update_tx.send(()).await?;
             }
 
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;

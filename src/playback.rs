@@ -12,31 +12,30 @@ use crate::sequencers::euclidean::input::EuclideanSequencerInput;
 use crate::sequencers::markov::config::MarkovSequencerConfig;
 use crate::sequencers::mixer::sequence_mixer::Mixer;
 
-pub async fn start_playback_loop(
+pub async fn play(
     mut midi_handler: MidiHandler,
     shared_state: Arc<Mutex<SharedState>>,
 ) -> Result<(), Error> {
     info!("Starting playback loop");
-
-     tokio::spawn(async move {
-        loop {
-            let state = shared_state.lock().await;
-            if state.playing {
-                let sequence = state.mixer_config.mixed_sequence.clone();
-                debug!("Playing {:?}", sequence);
-                 for i in 0..sequence.notes.len() {
-                    let pitch = sequence.notes[i].pitch;
-                    let duration = Duration::from_millis(sequence.notes[i].duration as u64);
-                    let velocity = sequence.notes[i].velocity;
-                    midi_handler.send_note_on(pitch, velocity).expect("Failed to send NOTE ON");
-                    time::sleep(duration).await;
-                    midi_handler.send_note_off(pitch).expect("Failed to send NOTE OFF");
-                }
+    loop {
+        let state = shared_state.lock().await;
+        if state.playing {
+            let sequence = state.mixer_config.mixed_sequence.clone();
+            if sequence.notes.len() == 0 {
+                continue;
             }
 
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            debug!("Playing {:?}", sequence);
+            for i in 0..sequence.notes.len() {
+                let pitch = sequence.notes[i].pitch;
+                let duration = Duration::from_millis(sequence.notes[i].duration as u64);
+                let velocity = sequence.notes[i].velocity;
+                midi_handler.send_note_on(pitch, velocity).expect("Failed to send NOTE ON");
+                time::sleep(duration).await;
+                midi_handler.send_note_off(pitch).expect("Failed to send NOTE OFF");
+            }
         }
-    });
 
-    Ok(())
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
