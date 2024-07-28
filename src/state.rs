@@ -33,7 +33,7 @@ impl SharedState {
 }
 
 pub struct SequencerChannels {
-    pub euclidean_tx: mpsc::Sender<EuclideanSequencerConfig>,
-    pub markov_tx: mpsc::Sender<MarkovSequencerConfig>,
+    pub a_tx: mpsc::Sender<EuclideanSequencerConfig>,
+    pub b_tx: mpsc::Sender<MarkovSequencerConfig>,
     pub mixer_tx: mpsc::Sender<()>,
 }

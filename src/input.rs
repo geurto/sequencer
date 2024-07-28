@@ -94,13 +94,13 @@ pub async fn process_input(
                         EuclideanSequencerInput::IncreaseOctave => euclidean_config.change_pitch(12),
                         EuclideanSequencerInput::DecreaseOctave => euclidean_config.change_pitch(-12),
                     }
-                    sequencer_channels.euclidean_tx.send(euclidean_config.clone()).await.unwrap();
+                    sequencer_channels.a_tx.send(euclidean_config.clone()).await.unwrap();
                 },
                 Input::Markov(markov_input) => {
                     match markov_input {
                         _ => {}
                     }
-                    sequencer_channels.markov_tx.send(markov_config.clone()).await.unwrap();
+                    sequencer_channels.b_tx.send(markov_config.clone()).await.unwrap();
                 },
                 Input::Mixer(mixer_input) => {
                     match mixer_input {

@@ -25,14 +25,14 @@ async fn main() -> Result<(), Error> {
 
     // tokio channels
     let (tx_input, rx_input) = mpsc::channel(1);
-    let (tx_config_euclidean, rx_config_euclidean) = mpsc::channel(1);
-    let (tx_config_markov, rx_config_markov) = mpsc::channel(1);
+    let (tx_config_a, rx_config_a) = mpsc::channel(1);
+    let (tx_config_b, rx_config_b) = mpsc::channel(1);
     let (tx_update_mixer, rx_update_mixer) = mpsc::channel(1);
     let (tx_shutdown, mut rx_shutdown) = mpsc::channel(1);
 
     let sequencer_channels = SequencerChannels {
-        euclidean_tx: tx_config_euclidean,
-        markov_tx: tx_config_markov,
+        a_tx: tx_config_a,
+        b_tx: tx_config_b,
         mixer_tx: tx_update_mixer.clone(),
     };
 
@@ -54,7 +54,7 @@ async fn main() -> Result<(), Error> {
 
     // Sequencers and mixer
     let mut sequencer_a  = EuclideanSequencer::new(
-        rx_config_euclidean,
+        rx_config_a,
         tx_update_mixer.clone(),
         shared_state.clone());
     sequencer_a.generate_sequence().await;
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Error> {
     });
 
     let mut sequencer_b = MarkovSequencer::new(
-        rx_config_markov,
+        rx_config_b,
         tx_update_mixer.clone(),
         shared_state.clone());
     sequencer_b.generate_sequence().await;

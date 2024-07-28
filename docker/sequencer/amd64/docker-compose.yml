@@ -2,7 +2,7 @@ version: "2.4"
 
 services:
   sequencer:
-    image: docker.io/geurto/generative-sequencer:sequencer
+    image: docker.io/geurto/generative-sequencer:sequencer-amd64
     privileged: true
     network_mode: host
     restart: always
