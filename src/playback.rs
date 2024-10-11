@@ -2,7 +2,7 @@ use anyhow::Error;
 use log::{debug, info};
 use tokio::sync::{mpsc, Mutex};
 use std::sync::Arc;
-use tokio::time::{self, Duration, Instant};
+use tokio::time::{self, Duration, Instant, sleep_until};
 
 use crate::state::*;
 use crate::midi::MidiHandler;
@@ -33,18 +33,20 @@ pub async fn play(midi_handler: Arc<Mutex<MidiHandler>>, shared_state: Arc<Mutex
 
                 {
                     let mut midi = midi_handler.lock().await;
-                    midi.send_note_on(note.pitch, note.velocity).expect("Failed to send NOTE ON");
+                    midi.send_note_on(note.pitch, note.velocity, state.midi_channel).expect("Failed to send NOTE ON");
                 }
 
                 // Schedule the note off
                 let note_duration = Duration::from_millis(note.duration as u64);
                 let note_off_time = Instant::now() + note_duration;
                 let pitch = note.pitch;
+                let midi_channel = state.midi_channel;
+
                 let midi_handler_clone = midi_handler.clone();
                 tokio::spawn(async move {
-                    tokio::time::sleep_until(note_off_time).await;
+                    sleep_until(note_off_time).await;
                     let mut midi = midi_handler_clone.lock().await;
-                    midi.send_note_off(pitch).expect("Failed to send NOTE OFF");
+                    midi.send_note_off(pitch, midi_channel).expect("Failed to send NOTE OFF");
                 });
 
                 // Move to the next note

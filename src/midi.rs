@@ -34,24 +34,24 @@ impl MidiHandler {
         }
 
         info!("Connecting to {}", midi_out.port_name(out_port)?);
-        let conn_out = midi_out.connect(out_port, "midir-test")
+        let conn_out = midi_out.connect(out_port, "gen-seq")
             .map_err(|e| anyhow!("Failed to connect to MIDI output: {}", e))?;
         Ok(Self { conn_out, conn_in: None })
     }
 
-    pub fn send_note_on(&mut self, note: u8, velocity: u8) -> Result<(), Error> {
-        self.conn_out.send(&[0x90, note, velocity])?;
+    pub fn send_note_on(&mut self, note: u8, velocity: u8, channel: u8) -> Result<(), Error> {
+        self.conn_out.send(&[0x90, note, velocity, channel])?;
         Ok(())
     }
 
-    pub fn send_note_off(&mut self, note: u8) -> Result<(), Error> {
-        self.conn_out.send(&[0x80, note, 0])?;
+    pub fn send_note_off(&mut self, note: u8, channel: u8) -> Result<(), Error> {
+        self.conn_out.send(&[0x80, note, 0, channel])?;
         Ok(())
     }
 
-    pub fn send_all_notes_off(&mut self) -> Result<(), Error> {
+    pub fn send_all_notes_off(&mut self, channel: u8) -> Result<(), Error> {
         for note in 0..=127 {
-            self.send_note_off(note)?;
+            self.send_note_off(note, channel)?;
         }
         Ok(())
     }

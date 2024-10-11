@@ -17,6 +17,7 @@ use crate::state::{SequencerChannels, SharedState};
 pub enum Input {
     Bpm(f32),
     TogglePlayback,
+    ChangeMidiChannel,
     IncreaseBpm,
     DecreaseBpm,
     Euclidean(EuclideanSequencerInput),
@@ -36,6 +37,7 @@ pub fn spawn_input_handler(
             for key in keys.difference(&last_keys) {
                 let input = match key {
                     Keycode::Space => Some(Input::TogglePlayback),
+                    Keycode::C => Some(Input::ChangeMidiChannel),
                     Keycode::R => Some(Input::Mixer(MixerInput::IncreaseRatio)),
                     Keycode::F => Some(Input::Mixer(MixerInput::DecreaseRatio)),
                     Keycode::Up => Some(Input::Euclidean(EuclideanSequencerInput::IncreaseSteps)),
@@ -79,8 +81,12 @@ pub async fn process_input(
                     info!("Toggling playback");
                     state.playing = !state.playing;
                 },
-                Input::IncreaseBpm => state.increase_bpm(),
                 Input::DecreaseBpm => state.decrease_bpm(),
+                Input::IncreaseBpm => state.increase_bpm(),
+                Input::ChangeMidiChannel => {
+                    state.change_midi_channel();
+                    info!("Changing MIDI channel to {}", state.midi_channel + 1)
+                },
                 Input::Euclidean(euclidean_input) => {
                     match euclidean_input {
                         EuclideanSequencerInput::IncreaseSteps => euclidean_config.increase_steps(),
