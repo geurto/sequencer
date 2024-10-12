@@ -1,4 +1,4 @@
-ARG BASE_IMAGE
+ARG BASE_IMAGE=rust
 FROM ${BASE_IMAGE}
 
 # Avoid prompts from apt
@@ -15,13 +15,6 @@ RUN apt-get update && \
   rm -rf /var/lib/apt/lists/* && \
   apt-get autoremove -y && \
   apt-get clean
-
-RUN git clone https://github.com/cjbarnes18/ttymidi.git && \
-  cd ttymidi && \
-  make && \
-  make install && \
-  cd .. && \
-  rm -rf ttymidi
 
 RUN mkdir -p /home/sequencer
 COPY src/ /home/sequencer/src

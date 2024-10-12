@@ -1,1 +1,2 @@
-ttymidi -s /dev/ttyAMA0 -b 38400 &
+echo "Starting..."
+sleep infinity
