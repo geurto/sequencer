@@ -6,6 +6,10 @@ services:
     privileged: true
     network_mode: host
     restart: always
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - "DISPLAY=$DISPLAY"
     ipc: host
     pid: host
     command: ["sleep", "infinity"]
