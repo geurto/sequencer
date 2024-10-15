@@ -1,9 +1,8 @@
 use log::debug;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::Receiver;
 use crate::note::Sequence;
-use crate::sequencers::mixer::config::MixerConfig;
 use crate::state::SharedState;
 
 pub struct Mixer {

@@ -10,7 +10,6 @@ use tokio::sync::{mpsc, Mutex};
 use crate::note::{Note, NoteDuration, Sequence};
 use crate::sequencers::traits::Sequencer;
 use crate::sequencers::markov::config::MarkovSequencerConfig;
-use crate::sequencers::mixer::config::MixerConfig;
 use crate::state::SharedState;
 
 pub struct MarkovSequencer {

@@ -10,7 +10,6 @@ use crate::sequencers::euclidean::config::EuclideanSequencerConfig;
 use crate::sequencers::euclidean::input::EuclideanSequencerInput;
 use crate::sequencers::markov::config::MarkovSequencerConfig;
 use crate::sequencers::markov::input::MarkovSequencerInput;
-use crate::sequencers::mixer::config::MixerConfig;
 use crate::sequencers::mixer::input::MixerInput;
 use crate::state::{SequencerChannels, SharedState};
 

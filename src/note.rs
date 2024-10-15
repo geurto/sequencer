@@ -1,5 +1,4 @@
 use std::fmt::{Debug, Formatter};
-use crate::state::SharedState;
 
 pub enum NoteDuration {
     Sixteenth = 1,

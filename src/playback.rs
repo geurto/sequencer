@@ -1,16 +1,11 @@
 use anyhow::Error;
 use log::{debug, info};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 use std::sync::Arc;
-use tokio::time::{self, Duration, Instant, sleep, sleep_until};
+use tokio::time::{Duration, sleep};
 
 use crate::state::*;
 use crate::midi::MidiHandler;
-use crate::input::Input;
-use crate::sequencers::euclidean::config::EuclideanSequencerConfig;
-use crate::sequencers::euclidean::input::EuclideanSequencerInput;
-use crate::sequencers::markov::config::MarkovSequencerConfig;
-use crate::sequencers::mixer::sequence_mixer::Mixer;
 
 pub async fn play(midi_handler: Arc<Mutex<MidiHandler>>, shared_state: Arc<Mutex<SharedState>>) -> Result<(), Error> {
     info!("Starting playback loop");

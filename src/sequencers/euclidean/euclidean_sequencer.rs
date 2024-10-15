@@ -1,6 +1,5 @@
 use crate::note::{Note, NoteDuration, Sequence};
 use crate::sequencers::euclidean::config::EuclideanSequencerConfig;
-use crate::sequencers::mixer::config::MixerConfig;
 use crate::sequencers::traits::Sequencer;
 
 use crate::state::SharedState;
@@ -21,7 +20,7 @@ impl EuclideanSequencer {
     pub fn new(config_rx: mpsc::Receiver<EuclideanSequencerConfig>,
                mixer_update_tx: mpsc::Sender<()>,
                shared_state: Arc<Mutex<SharedState>>) -> Self {
-        let mut config = EuclideanSequencerConfig::new();
+        let config = EuclideanSequencerConfig::new();
         EuclideanSequencer { config, config_rx, mixer_update_tx, shared_state }
     }
 }
