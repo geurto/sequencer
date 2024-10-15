@@ -32,7 +32,7 @@ impl Sequencer for EuclideanSequencer {
 
         if self.config.pulses == 0 {
             // Handle zero pulses case
-            let note = Note::new(0, 100, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm);
+            let note = Note::new(0, 0, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm);
             sequence.notes.push(note);
             return sequence;
         }
@@ -46,7 +46,7 @@ impl Sequencer for EuclideanSequencer {
             let note = if beat_locations.contains(&(i % self.config.steps)) {
                 Note::new(self.config.pitch, 100, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm)
             } else {
-                Note::new(0, 100, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm)
+                Note::new(0, 0, NoteDuration::Sixteenth, self.shared_state.lock().await.bpm)
             };
             sequence.notes.push(note);
         }

@@ -6,11 +6,15 @@ use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 
 pub struct MidiHandler {
     conn_out: MidiOutputConnection,
     conn_in: Option<MidiInputConnection<()>>,
 }
+
+const NOTE_ON_MSG: u8 = 0x90;
+const NOTE_OFF_MSG: u8 = 0x80;
 
 impl MidiHandler {
     pub fn new() -> Result<Self, Error> {
@@ -39,21 +43,10 @@ impl MidiHandler {
         Ok(Self { conn_out, conn_in: None })
     }
 
-    pub fn send_note_on(&mut self, note: u8, velocity: u8) -> Result<(), Error> {
-        self.conn_out.send(&[0x90, note, velocity])?;
-        Ok(())
-    }
-
-    pub fn send_note_off(&mut self, note: u8) -> Result<(), Error> {
-        self.conn_out.send(&[0x80, note, 0])?;
-        Ok(())
-    }
-
-    pub fn send_all_notes_off(&mut self) -> Result<(), Error> {
-        for note in 0..=127 {
-            self.send_note_off(note)?;
-        }
-        Ok(())
+    pub async fn play_note(&mut self, note: u8, duration: u64, velocity: u8, channel: u8) {
+        let _ = self.conn_out.send(&[NOTE_ON_MSG, note, velocity, channel]);
+        sleep(Duration::from_millis(duration)).await;
+        let _ = self.conn_out.send(&[NOTE_OFF_MSG, note, velocity, channel]);
     }
 
     pub async fn setup_midi_input(&mut self, shared_state: Arc<Mutex<SharedState>>) -> Result<(), Error> {
