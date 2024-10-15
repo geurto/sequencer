@@ -33,7 +33,7 @@ pub async fn play(midi_handler: Arc<Mutex<MidiHandler>>, shared_state: Arc<Mutex
 
                 {
                     let mut midi = midi_handler.lock().await;
-                    midi.send_note_on(note.pitch, note.velocity, state.midi_channel).expect("Failed to send NOTE ON");
+                    midi.send_note_on(note.pitch, note.velocity).expect("Failed to send NOTE ON");
                 }
 
                 // Schedule the note off
@@ -46,7 +46,7 @@ pub async fn play(midi_handler: Arc<Mutex<MidiHandler>>, shared_state: Arc<Mutex
                 tokio::spawn(async move {
                     sleep_until(note_off_time).await;
                     let mut midi = midi_handler_clone.lock().await;
-                    midi.send_note_off(pitch, midi_channel).expect("Failed to send NOTE OFF");
+                    midi.send_note_off(pitch).expect("Failed to send NOTE OFF");
                 });
 
                 // Move to the next note
