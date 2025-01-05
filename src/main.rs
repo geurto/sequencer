@@ -1,11 +1,12 @@
 use anyhow::Error;
 use env_logger::Builder;
+use sequencer::sequencers::euclidean::euclidean_sequencer;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::{mpsc, Mutex};
 
+use sequencer::sequencers::euclidean::gui::run;
 use sequencer::{
-    gui::run,
     input::{process_input, spawn_input_handler},
     playback::play,
     EuclideanSequencer, MarkovSequencer, MidiHandler, Mixer, Sequencer, SequencerChannels,
@@ -13,7 +14,7 @@ use sequencer::{
 };
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    Builder::new().filter(None, log::LevelFilter::Debug).init();
+    Builder::new().filter(None, log::LevelFilter::Info).init();
 
     // tokio channels
     let (tx_input, rx_input) = mpsc::channel(1);
@@ -47,8 +48,9 @@ async fn main() -> Result<(), Error> {
         sequencer_a.run(0).await.unwrap();
     }));
 
+    // both Euclidean for now to keep it simple
     let mut sequencer_b =
-        MarkovSequencer::new(rx_config_b, tx_update_mixer.clone(), shared_state.clone());
+        EuclideanSequencer::new(rx_config_b, tx_update_mixer.clone(), shared_state.clone());
     sequencer_b.generate_sequence().await;
     handles.push(tokio::spawn(async move {
         sequencer_b.run(1).await.unwrap();

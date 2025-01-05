@@ -1,7 +1,7 @@
-use tokio::sync::mpsc;
 use crate::sequencers::euclidean::config::EuclideanSequencerConfig;
 use crate::sequencers::markov::config::MarkovSequencerConfig;
 use crate::sequencers::mixer::config::MixerConfig;
+use tokio::sync::mpsc;
 
 pub struct SharedState {
     pub playing: bool,
@@ -32,11 +32,13 @@ impl SharedState {
         self.bpm -= 1.0;
     }
 
-    pub fn change_midi_channel(&mut self) { self.midi_channel = (self.midi_channel + 1) % 16; }
+    pub fn change_midi_channel(&mut self) {
+        self.midi_channel = (self.midi_channel + 1) % 16;
+    }
 }
 
 pub struct SequencerChannels {
     pub a_tx: mpsc::Sender<EuclideanSequencerConfig>,
-    pub b_tx: mpsc::Sender<MarkovSequencerConfig>,
+    pub b_tx: mpsc::Sender<EuclideanSequencerConfig>,
     pub mixer_tx: mpsc::Sender<()>,
 }
