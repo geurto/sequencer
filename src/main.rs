@@ -5,6 +5,7 @@ use tokio::signal;
 use tokio::sync::{mpsc, Mutex};
 
 use sequencer::{
+    gui::run,
     input::{process_input, spawn_input_handler},
     playback::play,
     EuclideanSequencer, MarkovSequencer, MidiHandler, Mixer, Sequencer, SequencerChannels,
@@ -76,7 +77,7 @@ async fn main() -> Result<(), Error> {
     }));
 
     // Shutdown
-    let ctrl_c_handle = tokio::spawn(async move {
+    let _ctrl_c_handle = tokio::spawn(async move {
         signal::ctrl_c()
             .await
             .expect("Failed to install Ctrl+C handler");
@@ -84,10 +85,7 @@ async fn main() -> Result<(), Error> {
         std::process::exit(0);
     });
 
-    tokio::select! {
-        _ = ctrl_c_handle => {},
-    }
-
+    run()?;
     Ok(())
 }
 
