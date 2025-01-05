@@ -58,7 +58,8 @@ impl EuclideanSequencerConfig {
 
     pub fn change_pitch(&mut self, amount: i8) {
         self.pitch = (self.pitch as i8 + amount) as u8;
-        self.pitch = std::cmp::max(std::cmp::min(self.pitch, 108), 20);
+        self.pitch = self.pitch.clamp(20, 108);
         debug!("Pitch: {}", self.pitch);
     }
 }
+

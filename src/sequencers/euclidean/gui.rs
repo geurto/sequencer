@@ -2,43 +2,35 @@ use iced::widget::canvas::{self, Canvas, Frame, Path};
 use iced::widget::{Column, Container};
 use iced::{Color, Element, Length, Point, Renderer, Subscription, Theme};
 
-const BACKGROUND_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54); // #753A8A
-const TEXT_COLOR: Color = Color::from_rgb(0.97, 0.97, 0.95); // #F7F7F2
+use log::debug;
+
+const BACKGROUND_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
+const TEXT_COLOR: Color = Color::from_rgb(0.97, 0.97, 0.95);
 const CIRCLE_RADIUS: f32 = 20.0;
 const CIRCLE_SPACING: f32 = 60.0;
 
-#[derive(Debug, Clone, Copy)]
-pub enum EuclideanMessage {
-    ChangeSteps(usize),
-    ChangePulses(usize),
-    ChangePhase(usize),
-    ChangePitch(usize),
-    ChangeOctave(i8),
+#[derive(Debug, Clone)]
+pub enum EuclideanGuiMessage {
+    SetPulses([bool; 16]),
 }
 
 #[derive(Default)]
 pub struct EuclideanGui {
-    pub steps: usize,
-    pub pulses: usize,
-    pub phase: usize,
-    pub pitch: u8,
+    pub pulses: [bool; 16],
 }
 
 impl EuclideanGui {
-    fn subscription(&self) -> Subscription<EuclideanMessage> {
+    pub fn subscription(&self) -> Subscription<EuclideanGuiMessage> {
         Subscription::none()
     }
 
-    fn update(&mut self, message: EuclideanMessage) {
+    pub fn update(&mut self, message: EuclideanGuiMessage) {
         match message {
-            EuclideanMessage::ChangeSteps(steps) => {
-                self.steps = steps;
-            }
-            _ => {}
+            EuclideanGuiMessage::SetPulses(pulses) => self.set_pulses(pulses),
         }
     }
 
-    fn view(&self) -> Element<EuclideanMessage> {
+    pub fn view(&self) -> Element<EuclideanGuiMessage> {
         let canvas = Canvas::new(self).width(Length::Fill).height(Length::Fill);
 
         let content = Column::new()
@@ -52,8 +44,13 @@ impl EuclideanGui {
             .height(Length::Fill)
             .into()
     }
+
+    fn set_pulses(&mut self, pulses: [bool; 16]) {
+        self.pulses = pulses;
+    }
 }
-impl canvas::Program<EuclideanMessage> for EuclideanGui {
+
+impl canvas::Program<EuclideanGuiMessage> for EuclideanGui {
     type State = ();
 
     fn draw(
@@ -74,7 +71,7 @@ impl canvas::Program<EuclideanMessage> for EuclideanGui {
                 );
 
                 let circle = Path::circle(center, CIRCLE_RADIUS);
-                let color = if (row + col) % 2 == 0 {
+                let color = if self.pulses[4 * row + col] {
                     TEXT_COLOR
                 } else {
                     BACKGROUND_COLOR
@@ -85,16 +82,4 @@ impl canvas::Program<EuclideanMessage> for EuclideanGui {
         }
         vec![frame.into_geometry()]
     }
-}
-
-pub fn run() -> iced::Result {
-    iced::application(
-        "Euclidean Sequencer",
-        EuclideanGui::update,
-        EuclideanGui::view,
-    )
-    .subscription(EuclideanGui::subscription)
-    .theme(|_| Theme::Dark)
-    .centered()
-    .run()
 }

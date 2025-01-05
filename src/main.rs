@@ -1,16 +1,14 @@
 use anyhow::Error;
 use env_logger::Builder;
-use sequencer::sequencers::euclidean::euclidean_sequencer;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::{mpsc, Mutex};
 
-use sequencer::sequencers::euclidean::gui::run;
 use sequencer::{
+    gui::run_gui,
     input::{process_input, spawn_input_handler},
     playback::play,
-    EuclideanSequencer, MarkovSequencer, MidiHandler, Mixer, Sequencer, SequencerChannels,
-    SharedState,
+    EuclideanSequencer, MidiHandler, Mixer, Sequencer, SequencerChannels, SharedState,
 };
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -19,6 +17,8 @@ async fn main() -> Result<(), Error> {
     // tokio channels
     let (tx_input, rx_input) = mpsc::channel(1);
     let (tx_config_a, rx_config_a) = mpsc::channel(1);
+    let (tx_gui_a, rx_gui_a) = mpsc::channel(1);
+    let (tx_gui_b, rx_gui_b) = mpsc::channel(1);
     let (tx_config_b, rx_config_b) = mpsc::channel(1);
     let (tx_update_mixer, rx_update_mixer) = mpsc::channel(1);
 
@@ -41,16 +41,24 @@ async fn main() -> Result<(), Error> {
     let mut handles = vec![];
 
     // Sequencers and mixer
-    let mut sequencer_a =
-        EuclideanSequencer::new(rx_config_a, tx_update_mixer.clone(), shared_state.clone());
+    let mut sequencer_a = EuclideanSequencer::new(
+        rx_config_a,
+        tx_gui_a,
+        tx_update_mixer.clone(),
+        shared_state.clone(),
+    );
     sequencer_a.generate_sequence().await;
     handles.push(tokio::spawn(async move {
         sequencer_a.run(0).await.unwrap();
     }));
 
     // both Euclidean for now to keep it simple
-    let mut sequencer_b =
-        EuclideanSequencer::new(rx_config_b, tx_update_mixer.clone(), shared_state.clone());
+    let mut sequencer_b = EuclideanSequencer::new(
+        rx_config_b,
+        tx_gui_b,
+        tx_update_mixer.clone(),
+        shared_state.clone(),
+    );
     sequencer_b.generate_sequence().await;
     handles.push(tokio::spawn(async move {
         sequencer_b.run(1).await.unwrap();
@@ -87,7 +95,7 @@ async fn main() -> Result<(), Error> {
         std::process::exit(0);
     });
 
-    run()?;
+    // GUI
+    run_gui()?;
     Ok(())
 }
-

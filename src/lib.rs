@@ -6,6 +6,7 @@ pub mod playback;
 pub mod sequencers;
 pub mod state;
 
+pub use gui::run_gui;
 pub use input::{process_input, spawn_input_handler};
 pub use midi::MidiHandler;
 pub use playback::play;
