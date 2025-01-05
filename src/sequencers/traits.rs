@@ -1,7 +1,11 @@
-use anyhow::Error;
 use crate::note::Sequence;
+use anyhow::Error;
 
 pub trait Sequencer {
-    async fn generate_sequence(&self) -> Sequence;
-    async fn run(&mut self, sequencer_slot: usize) -> Result<(), Error>;
+    fn generate_sequence(&self) -> impl std::future::Future<Output = Sequence> + Send;
+    fn run(
+        &mut self,
+        sequencer_slot: usize,
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 }
+

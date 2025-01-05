@@ -1,23 +1,15 @@
-mod playback;
-mod sequencers;
-mod state;
-mod midi;
-mod input;
-mod note;
-
 use anyhow::Error;
 use env_logger::Builder;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::state::{SequencerChannels, SharedState};
-use crate::midi::MidiHandler;
-use crate::sequencers::euclidean::euclidean_sequencer::EuclideanSequencer;
-use crate::sequencers::markov::markov_sequencer::MarkovSequencer;
-use crate::sequencers::mixer::sequence_mixer::Mixer;
-use crate::sequencers::traits::Sequencer;
-
+use sequencer::{
+    input::{process_input, spawn_input_handler},
+    playback::play,
+    EuclideanSequencer, MarkovSequencer, MidiHandler, Mixer, Sequencer, SequencerChannels,
+    SharedState,
+};
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     Builder::new().filter(None, log::LevelFilter::Debug).init();
@@ -38,24 +30,24 @@ async fn main() -> Result<(), Error> {
 
     // MIDI input and output
     let midi_handler = Arc::new(Mutex::new(MidiHandler::new()?));
-    midi_handler.lock().await.setup_midi_input(shared_state.clone()).await?;
+    midi_handler
+        .lock()
+        .await
+        .setup_midi_input(shared_state.clone())
+        .await?;
 
     let mut handles = vec![];
 
     // Sequencers and mixer
-    let mut sequencer_a  = EuclideanSequencer::new(
-        rx_config_a,
-        tx_update_mixer.clone(),
-        shared_state.clone());
+    let mut sequencer_a =
+        EuclideanSequencer::new(rx_config_a, tx_update_mixer.clone(), shared_state.clone());
     sequencer_a.generate_sequence().await;
     handles.push(tokio::spawn(async move {
         sequencer_a.run(0).await.unwrap();
     }));
 
-    let mut sequencer_b = MarkovSequencer::new(
-        rx_config_b,
-        tx_update_mixer.clone(),
-        shared_state.clone());
+    let mut sequencer_b =
+        MarkovSequencer::new(rx_config_b, tx_update_mixer.clone(), shared_state.clone());
     sequencer_b.generate_sequence().await;
     handles.push(tokio::spawn(async move {
         sequencer_b.run(1).await.unwrap();
@@ -68,22 +60,26 @@ async fn main() -> Result<(), Error> {
     }));
 
     // Input handling
-    input::spawn_input_handler(tx_input.clone());
+    spawn_input_handler(tx_input.clone());
     let shared_state_input = shared_state.clone();
     handles.push(tokio::spawn(async move {
-        input::process_input(rx_input, shared_state_input, sequencer_channels).await;
+        process_input(rx_input, shared_state_input, sequencer_channels).await;
     }));
 
     // Playback
     let shared_state_playback = shared_state.clone();
     let midi_handler_clone = midi_handler.clone();
     handles.push(tokio::spawn(async move {
-        playback::play(midi_handler_clone, shared_state_playback).await.unwrap();
+        play(midi_handler_clone, shared_state_playback)
+            .await
+            .unwrap();
     }));
 
     // Shutdown
     let ctrl_c_handle = tokio::spawn(async move {
-        signal::ctrl_c().await.expect("Failed to install Ctrl+C handler");
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
         println!("Ctrl+C received, exiting...");
         std::process::exit(0);
     });
@@ -94,3 +90,4 @@ async fn main() -> Result<(), Error> {
 
     Ok(())
 }
+
