@@ -5,7 +5,7 @@ use tokio::signal;
 use tokio::sync::{mpsc, Mutex};
 
 use sequencer::{
-    gui::run_gui,
+    gui,
     input::{process_input, spawn_input_handler},
     playback::play,
     EuclideanSequencer, MidiHandler, Mixer, Sequencer, SequencerChannels, SharedState,
@@ -96,6 +96,6 @@ async fn main() -> Result<(), Error> {
     });
 
     // GUI
-    run_gui()?;
+    gui::run()?;
     Ok(())
 }
