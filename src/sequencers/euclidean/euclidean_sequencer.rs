@@ -3,7 +3,7 @@ use crate::sequencers::euclidean::config::EuclideanSequencerConfig;
 use crate::sequencers::traits::Sequencer;
 
 use crate::state::SharedState;
-use anyhow::Error;
+use anyhow::Result;
 use log::debug;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -77,7 +77,7 @@ impl Sequencer for EuclideanSequencer {
         sequence
     }
 
-    async fn run(&mut self, sequencer_slot: usize) -> Result<(), Error> {
+    async fn run(&mut self, sequencer_slot: usize) -> Result<()> {
         loop {
             if let Some(config) = self.config_rx.recv().await {
                 debug!("Euclidean sequencer received config: {:?}", config);
@@ -89,7 +89,7 @@ impl Sequencer for EuclideanSequencer {
                     match sequencer_slot {
                         0 => state.mixer_config.sequence_a = sequence,
                         1 => state.mixer_config.sequence_b = sequence,
-                        _ => panic!("Invalid sequencer slot"),
+                        _ => anyhow::bail!("Invalid sequencer slot"),
                     }
                 }
                 self.mixer_update_tx.send(()).await?;
@@ -99,4 +99,3 @@ impl Sequencer for EuclideanSequencer {
         }
     }
 }
-

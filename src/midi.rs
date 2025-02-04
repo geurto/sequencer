@@ -26,21 +26,29 @@ impl MidiHandler {
             info!("{}: {}", i, midi_out.port_name(p)?);
         }
 
-        let out_ports_ttymidi = out_ports.iter().filter(|p| midi_out.port_name(p).unwrap().contains("ttymidi")).collect::<Vec<_>>();
-        let out_port;
-        if out_ports_ttymidi.is_empty() {
+        let out_ports_ttymidi = out_ports
+            .iter()
+            .filter(|p| midi_out.port_name(p).unwrap().contains("ttymidi"))
+            .collect::<Vec<_>>();
+        let out_port = if out_ports_ttymidi.is_empty() {
             warn!("No ttymidi output ports available.");
-            out_port = out_ports.get(0)
-                .ok_or_else(|| anyhow!("No MIDI output ports available"))?;
+            out_ports
+                .first()
+                .ok_or_else(|| anyhow!("No MIDI output ports available"))?
         } else {
-            out_port = out_ports_ttymidi.get(0)
-                .ok_or_else(|| anyhow!("No ttymidi output ports available"))?;
-        }
+            out_ports_ttymidi
+                .first()
+                .ok_or_else(|| anyhow!("No ttymidi output ports available"))?
+        };
 
         info!("Connecting to {}", midi_out.port_name(out_port)?);
-        let conn_out = midi_out.connect(out_port, "gen-seq")
+        let conn_out = midi_out
+            .connect(out_port, "gen-seq")
             .map_err(|e| anyhow!("Failed to connect to MIDI output: {}", e))?;
-        Ok(Self { conn_out, conn_in: None })
+        Ok(Self {
+            conn_out,
+            conn_in: None,
+        })
     }
 
     pub async fn play_note(&mut self, note: u8, duration: u64, velocity: u8, channel: u8) {
@@ -49,50 +57,62 @@ impl MidiHandler {
         let _ = self.conn_out.send(&[NOTE_OFF_MSG, note, velocity, channel]);
     }
 
-    pub async fn setup_midi_input(&mut self, shared_state: Arc<Mutex<SharedState>>) -> Result<(), Error> {
+    pub async fn setup_midi_input(
+        &mut self,
+        shared_state: Arc<Mutex<SharedState>>,
+    ) -> Result<(), Error> {
         info!("Setting up MIDI input...");
-        let mut midi_in = MidiInput::new("MIDI Input")
-            .context("Failed to create MIDI input")?;
+        let mut midi_in = MidiInput::new("MIDI Input").context("Failed to create MIDI input")?;
         midi_in.ignore(midir::Ignore::None);
 
         let in_ports = midi_in.ports();
-        let in_port;
         info!("Available input ports:");
         for (i, p) in in_ports.iter().enumerate() {
-            info!("{}: {}", i, midi_in.port_name(p)
-            .context("Failed to get port name")?);
+            info!(
+                "{}: {}",
+                i,
+                midi_in.port_name(p).context("Failed to get port name")?
+            );
         }
-        let in_ports_ttymidi = in_ports.iter()
-            .filter(|p| midi_in.port_name(p)
-                .unwrap_or_default()
-                .contains("ttymidi"))
+        let in_ports_ttymidi = in_ports
+            .iter()
+            .filter(|p| midi_in.port_name(p).unwrap_or_default().contains("ttymidi"))
             .collect::<Vec<_>>();
-        if in_ports_ttymidi.is_empty() {
+        let in_port = if in_ports_ttymidi.is_empty() {
             warn!("No ttymidi input ports available.");
-            in_port = in_ports.get(0)
-                .ok_or_else(|| anyhow!("No MIDI input ports available"))?;
+            in_ports
+                .first()
+                .ok_or_else(|| anyhow!("No MIDI input ports available"))?
         } else {
-            in_port = in_ports_ttymidi.get(0)
-                .ok_or_else(|| anyhow!("No ttymidi input ports available"))?;
-        }
-        info!("Connecting to {}", midi_in.port_name(in_port)
-        .context("Failed to get port name")?);
+            in_ports_ttymidi
+                .first()
+                .ok_or_else(|| anyhow!("No ttymidi input ports available"))?
+        };
+
+        info!(
+            "Connecting to {}",
+            midi_in
+                .port_name(in_port)
+                .context("Failed to get port name")?
+        );
 
         let handle = Handle::current();
 
-        let conn_in = midi_in.connect(
-            in_port,
-            "midir-test",
-            move |_stamp, message, _| {
-                let shared_state = shared_state.clone();
-                let message = message.to_vec();
-                let handle = handle.clone();
-                handle.spawn(async move {
-                    handle_midi_message(message, &shared_state).await;
-                });
-            },
-            (),
-        ).map_err(|e| anyhow!("Failed to connect to MIDI input: {}", e))?;
+        let conn_in = midi_in
+            .connect(
+                in_port,
+                "midir-test",
+                move |_stamp, message, _| {
+                    let shared_state = shared_state.clone();
+                    let message = message.to_vec();
+                    let handle = handle.clone();
+                    handle.spawn(async move {
+                        handle_midi_message(message, &shared_state).await;
+                    });
+                },
+                (),
+            )
+            .map_err(|e| anyhow!("Failed to connect to MIDI input: {}", e))?;
 
         self.conn_in = Some(conn_in);
         Ok(())
@@ -110,3 +130,4 @@ async fn handle_midi_message(message: Vec<u8>, shared_state: &Arc<Mutex<SharedSt
         }
     }
 }
+

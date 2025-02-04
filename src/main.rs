@@ -1,24 +1,24 @@
-use anyhow::Error;
+use anyhow::Result;
 use env_logger::Builder;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::{mpsc, Mutex};
 
 use sequencer::{
-    gui,
     input::{process_input, spawn_input_handler},
     playback::play,
-    EuclideanSequencer, MidiHandler, Mixer, Sequencer, SequencerChannels, SharedState,
+    EuclideanSequencer, Gui, MidiHandler, Mixer, Sequencer, SequencerChannels, SharedState,
 };
+
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<()> {
     Builder::new().filter(None, log::LevelFilter::Info).init();
 
     // tokio channels
     let (tx_input, rx_input) = mpsc::channel(1);
     let (tx_config_a, rx_config_a) = mpsc::channel(1);
-    let (tx_gui_a, rx_gui_a) = mpsc::channel(1);
-    let (tx_gui_b, rx_gui_b) = mpsc::channel(1);
+    let (tx_gui_a, _) = mpsc::channel(1);
+    let (tx_gui_b, _) = mpsc::channel(1);
     let (tx_config_b, rx_config_b) = mpsc::channel(1);
     let (tx_update_mixer, rx_update_mixer) = mpsc::channel(1);
 
@@ -96,6 +96,6 @@ async fn main() -> Result<(), Error> {
     });
 
     // GUI
-    gui::run()?;
+    Gui::run()?;
     Ok(())
 }

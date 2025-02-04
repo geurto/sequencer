@@ -8,8 +8,6 @@ use tokio::sync::{mpsc, Mutex};
 
 use crate::sequencers::euclidean::config::EuclideanSequencerConfig;
 use crate::sequencers::euclidean::input::EuclideanSequencerInput;
-use crate::sequencers::markov::config::MarkovSequencerConfig;
-use crate::sequencers::markov::input::MarkovSequencerInput;
 use crate::sequencers::mixer::input::MixerInput;
 use crate::state::{SequencerChannels, SharedState};
 
@@ -20,7 +18,6 @@ pub enum Input {
     IncreaseBpm,
     DecreaseBpm,
     Euclidean(EuclideanSequencerInput),
-    Markov(MarkovSequencerInput),
     Mixer(MixerInput),
 }
 
@@ -70,7 +67,6 @@ pub async fn process_input(
     sequencer_channels: SequencerChannels,
 ) {
     let mut euclidean_config = EuclideanSequencerConfig::new();
-    let markov_config = MarkovSequencerConfig::new();
     loop {
         if let Some(input) = rx.recv().await {
             let mut state = shared_state.lock().await;
@@ -115,12 +111,6 @@ pub async fn process_input(
                         .send(euclidean_config.clone())
                         .await
                         .unwrap();
-                }
-                Input::Markov(markov_input) => {
-                    match markov_input {
-                        _ => {}
-                    }
-                    //sequencer_channels.b_tx.send(markov_config.clone()).await.unwrap();
                 }
                 Input::Mixer(mixer_input) => match mixer_input {
                     MixerInput::IncreaseRatio => state.mixer_config.increase_ratio(),

@@ -40,3 +40,10 @@ impl MixerConfig {
         debug!("Updated sequence B");
     }
 }
+
+impl Default for MixerConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+

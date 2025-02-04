@@ -45,18 +45,14 @@ pub struct Sequence {
 }
 
 impl Sequence {
-    pub fn default() -> Self {
-        let mut notes = vec![];
-        notes.push(Note::new(0, 0, NoteDuration::Whole, 120.0));
-        Sequence { notes }
-    }
-
     pub fn empty() -> Self {
         Sequence { notes: vec![] }
     }
 
     fn midi_to_note_name(pitch: u8) -> String {
-        let note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        let note_names = [
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+        ];
         let octave = (pitch / 12) as i8 - 1;
         let note = note_names[(pitch % 12) as usize];
         format!("[{}{}]", note, octave)
@@ -86,5 +82,12 @@ impl Debug for Sequence {
         }
 
         result.fmt(f)
+    }
+}
+
+impl Default for Sequence {
+    fn default() -> Self {
+        let notes = vec![Note::new(0, 0, NoteDuration::Whole, 120.0)];
+        Sequence { notes }
     }
 }

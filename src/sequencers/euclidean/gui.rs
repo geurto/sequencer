@@ -1,8 +1,6 @@
 use iced::widget::canvas::{self, Canvas, Frame, Path};
 use iced::widget::{Column, Container};
-use iced::{Color, Element, Length, Point, Renderer, Subscription, Theme};
-
-use log::debug;
+use iced::{Color, Element, Length, Point, Renderer, Subscription};
 
 const BACKGROUND_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
 const TEXT_COLOR: Color = Color::from_rgb(0.97, 0.97, 0.95);

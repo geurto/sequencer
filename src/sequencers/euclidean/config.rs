@@ -63,3 +63,8 @@ impl EuclideanSequencerConfig {
     }
 }
 
+impl Default for EuclideanSequencerConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}

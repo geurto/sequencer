@@ -1,14 +1,13 @@
 use crate::sequencers::euclidean::gui::{EuclideanGui, EuclideanGuiMessage};
-use iced::widget::canvas::{self, Canvas, Frame, Path};
-use iced::widget::{column, row, Column, Container};
-use iced::{Color, Element, Length, Point, Renderer, Subscription, Theme};
+use iced::widget::row;
+use iced::{Element, Subscription, Theme};
 
 #[derive(Debug, Clone)]
 enum GuiMessage {
     EuclideanGuiMessage(EuclideanGuiMessage),
 }
 
-struct Gui {
+pub struct Gui {
     sequencer_left_gui: EuclideanGui,
     sequencer_right_gui: EuclideanGui,
 }

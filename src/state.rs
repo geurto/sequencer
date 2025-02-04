@@ -1,5 +1,4 @@
 use crate::sequencers::euclidean::config::EuclideanSequencerConfig;
-use crate::sequencers::markov::config::MarkovSequencerConfig;
 use crate::sequencers::mixer::config::MixerConfig;
 use tokio::sync::mpsc;
 
