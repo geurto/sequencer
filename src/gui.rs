@@ -1,5 +1,8 @@
 use crate::sequencers::euclidean::gui::{EuclideanGui, EuclideanGuiMessage};
-use iced::{widget::row, Element, Subscription, Theme};
+use iced::{
+    widget::{container, row, Container},
+    Element, Length, Subscription, Theme,
+};
 
 #[derive(Debug, Clone)]
 pub enum GuiMessage {
@@ -7,34 +10,45 @@ pub enum GuiMessage {
     RightGuiMessage(EuclideanGuiMessage),
 }
 
-#[derive(Default)]
 pub struct Gui {
-    sequencer_left_gui: EuclideanGui,
-    sequencer_right_gui: EuclideanGui,
+    sequencer_left: EuclideanGui,
+    sequencer_right: EuclideanGui,
 }
 
 impl Gui {
+    fn new() -> Self {
+        Self {
+            sequencer_left: EuclideanGui::new(1),
+            sequencer_right: EuclideanGui::new(2),
+        }
+    }
     pub fn subscription(&self) -> Subscription<GuiMessage> {
         Subscription::none()
     }
 
     pub fn update(&mut self, message: GuiMessage) {
         match message {
-            GuiMessage::LeftGuiMessage(msg) => self.sequencer_left_gui.update(msg),
-            GuiMessage::RightGuiMessage(msg) => self.sequencer_right_gui.update(msg),
+            GuiMessage::LeftGuiMessage(msg) => self.sequencer_left.update(msg),
+            GuiMessage::RightGuiMessage(msg) => self.sequencer_right.update(msg),
         }
     }
 
     pub fn view(&self) -> Element<GuiMessage> {
-        let sequencer_left_view = self
-            .sequencer_left_gui
-            .view()
-            .map(GuiMessage::LeftGuiMessage);
-        let sequencer_right_view = self
-            .sequencer_right_gui
-            .view()
-            .map(GuiMessage::RightGuiMessage);
-        row![sequencer_left_view, sequencer_right_view].into()
+        let sequencer_left_view =
+            Container::new(self.sequencer_left.view().map(GuiMessage::LeftGuiMessage))
+                .width(Length::FillPortion(1))
+                .height(Length::Fill);
+
+        let sequencer_right_view =
+            Container::new(self.sequencer_right.view().map(GuiMessage::RightGuiMessage))
+                .width(Length::FillPortion(1))
+                .height(Length::Fill);
+
+        let content = row![sequencer_left_view, sequencer_right_view].spacing(20);
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     pub fn run() -> iced::Result {
@@ -44,5 +58,11 @@ impl Gui {
             .antialiasing(true)
             .centered()
             .run()
+    }
+}
+
+impl Default for Gui {
+    fn default() -> Self {
+        Self::new()
     }
 }

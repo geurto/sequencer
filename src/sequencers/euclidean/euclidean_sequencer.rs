@@ -4,7 +4,7 @@ use crate::sequencers::traits::Sequencer;
 
 use crate::state::SharedState;
 use anyhow::Result;
-use log::debug;
+use log::{debug, error};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -82,7 +82,9 @@ impl Sequencer for EuclideanSequencer {
             if let Some(config) = self.config_rx.recv().await {
                 debug!("Euclidean sequencer received config: {:?}", config);
                 self.config = config.clone();
-                self.gui_tx.send(config).await.unwrap();
+                if let Err(e) = self.gui_tx.send(config).await {
+                    error!("Error sending GUI message: {}", e);
+                }
                 let sequence = self.generate_sequence().await;
                 {
                     let mut state = self.shared_state.lock().await;

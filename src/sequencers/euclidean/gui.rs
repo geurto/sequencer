@@ -1,5 +1,6 @@
 use iced::widget::canvas::{self, Canvas, Frame, Path};
-use iced::widget::{Column, Container};
+use iced::widget::{column, container, text};
+use iced::Alignment::Center;
 use iced::{Color, Element, Length, Point, Renderer, Subscription};
 
 const BACKGROUND_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
@@ -14,10 +15,17 @@ pub enum EuclideanGuiMessage {
 
 #[derive(Default)]
 pub struct EuclideanGui {
+    index: usize,
     pub pulses: [bool; 16],
 }
 
 impl EuclideanGui {
+    pub fn new(index: usize) -> Self {
+        Self {
+            index,
+            pulses: [false; 16],
+        }
+    }
     pub fn subscription(&self) -> Subscription<EuclideanGuiMessage> {
         Subscription::none()
     }
@@ -30,16 +38,12 @@ impl EuclideanGui {
 
     pub fn view(&self) -> Element<EuclideanGuiMessage> {
         let canvas = Canvas::new(self).width(Length::Fill).height(Length::Fill);
-
-        let content = Column::new()
-            .push(canvas)
+        let content = column![canvas, text!("Sequencer {0}", self.index)];
+        container(content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(20);
-
-        Container::new(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
+            .align_x(Center)
+            .align_y(Center)
             .into()
     }
 
@@ -64,8 +68,8 @@ impl canvas::Program<EuclideanGuiMessage> for EuclideanGui {
         for row in 0..4 {
             for col in 0..4 {
                 let center = Point::new(
-                    bounds.x + CIRCLE_SPACING * (col as f32 + 0.5),
-                    bounds.y + CIRCLE_SPACING * (row as f32 + 0.5),
+                    CIRCLE_SPACING * (col as f32 + 0.5),
+                    CIRCLE_SPACING * (row as f32 + 0.5),
                 );
 
                 let circle = Path::circle(center, CIRCLE_RADIUS);
