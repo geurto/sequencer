@@ -3,8 +3,8 @@ use iced::widget::{column, container, text};
 use iced::Alignment::Center;
 use iced::{Color, Element, Length, Point, Renderer, Subscription};
 
-const BACKGROUND_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
-const TEXT_COLOR: Color = Color::from_rgb(0.97, 0.97, 0.95);
+const FILL_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
+const BACKGROUND_COLOR: Color = Color::from_rgb(0., 0., 0.);
 const CIRCLE_RADIUS: f32 = 20.0;
 const CIRCLE_SPACING: f32 = 60.0;
 
@@ -74,11 +74,13 @@ impl canvas::Program<EuclideanGuiMessage> for EuclideanGui {
 
                 let circle = Path::circle(center, CIRCLE_RADIUS);
                 let color = if self.pulses[4 * row + col] {
-                    TEXT_COLOR
+                    FILL_COLOR
                 } else {
                     BACKGROUND_COLOR
                 };
 
+                let bg_circle = Path::circle(center, CIRCLE_RADIUS + 2.);
+                frame.fill(&bg_circle, FILL_COLOR);
                 frame.fill(&circle, color);
             }
         }
