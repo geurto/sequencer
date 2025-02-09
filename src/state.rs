@@ -2,6 +2,7 @@ use crate::sequencers::euclidean::config::EuclideanSequencerConfig;
 use crate::sequencers::mixer::config::MixerConfig;
 use tokio::sync::mpsc;
 
+#[derive(Default)]
 pub struct SharedState {
     pub playing: bool,
     pub bpm: f32,
