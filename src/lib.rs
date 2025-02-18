@@ -10,8 +10,5 @@ pub use gui::Gui;
 pub use input::{process_input, spawn_input_handler};
 pub use midi::MidiHandler;
 pub use playback::play;
-pub use sequencers::{
-    euclidean::euclidean_sequencer::EuclideanSequencer, mixer::sequence_mixer::Mixer,
-    traits::Sequencer,
-};
+pub use sequencers::{euclidean::EuclideanSequencer, mixer::Mixer, traits::Sequencer};
 pub use state::{SequencerChannels, SharedState};

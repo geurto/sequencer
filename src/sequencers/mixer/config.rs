@@ -2,6 +2,11 @@ use crate::note::Sequence;
 
 use log::debug;
 
+pub enum MixerInput {
+    IncreaseRatio,
+    DecreaseRatio,
+}
+
 #[derive(Debug)]
 pub struct MixerConfig {
     pub ratio: f32,
@@ -46,4 +51,3 @@ impl Default for MixerConfig {
         Self::new()
     }
 }
-

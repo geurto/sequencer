@@ -1,5 +1,18 @@
 use log::debug;
 
+pub enum EuclideanSequencerInput {
+    IncreaseSteps,
+    DecreaseSteps,
+    IncreasePulses,
+    DecreasePulses,
+    IncreasePhase,
+    DecreasePhase,
+    IncreasePitch,
+    DecreasePitch,
+    IncreaseOctave,
+    DecreaseOctave,
+}
+
 #[derive(Clone, Debug)]
 pub struct EuclideanSequencerConfig {
     pub steps: usize,

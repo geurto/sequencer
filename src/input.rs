@@ -6,9 +6,8 @@ use std::thread;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::sequencers::euclidean::config::EuclideanSequencerConfig;
-use crate::sequencers::euclidean::input::EuclideanSequencerInput;
-use crate::sequencers::mixer::input::MixerInput;
+use crate::sequencers::euclidean::config::{EuclideanSequencerConfig, EuclideanSequencerInput};
+use crate::sequencers::mixer::config::MixerInput;
 use crate::state::{SequencerChannels, SharedState};
 
 pub enum Input {
