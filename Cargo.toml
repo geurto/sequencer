@@ -10,9 +10,10 @@ anyhow = "1.0.86"
 ctrlc = "3.1.0"
 device_query = "2.1.0"
 env_logger = "0.11.3"
-iced = { version = "0.13.1", features = ["canvas"] }
+iced = { version = "0.13.1", features = ["advanced", "canvas"] }
 log = "0.4.22"
 markov = "1.1.0"
 midir = "0.10.0"
+rustc-hash = "2.1.1"
 throttle = "0.1.0"
 tokio = { version = "1.36.0", features = ["full", "sync", "time"] }

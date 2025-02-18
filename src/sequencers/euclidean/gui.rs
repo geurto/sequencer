@@ -1,7 +1,12 @@
+use iced::advanced::subscription;
 use iced::widget::canvas::{self, Canvas, Frame, Path};
 use iced::widget::{column, container, text};
 use iced::Alignment::Center;
 use iced::{Color, Element, Length, Point, Renderer, Subscription};
+use rustc_hash::FxHasher;
+use tokio::sync::mpsc;
+
+use super::config::EuclideanSequencerConfig;
 
 const FILL_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
 const BACKGROUND_COLOR: Color = Color::from_rgb(0., 0., 0.);
@@ -9,34 +14,33 @@ const CIRCLE_RADIUS: f32 = 20.0;
 const CIRCLE_SPACING: f32 = 60.0;
 
 #[derive(Debug, Clone)]
-pub enum EuclideanGuiMessage {
-    SetPulses([bool; 16]),
+pub enum Message {
+    ConfigChange(EuclideanSequencerConfig),
 }
 
-#[derive(Default)]
-pub struct EuclideanGui {
+pub struct Gui {
+    config: EuclideanSequencerConfig,
     index: usize,
-    pub pulses: [bool; 16],
 }
 
-impl EuclideanGui {
+impl Gui {
     pub fn new(index: usize) -> Self {
         Self {
+            config: EuclideanSequencerConfig::new(),
             index,
-            pulses: [false; 16],
         }
     }
-    pub fn subscription(&self) -> Subscription<EuclideanGuiMessage> {
+    pub fn subscription(&self) -> Subscription<Message> {
         Subscription::none()
     }
 
-    pub fn update(&mut self, message: EuclideanGuiMessage) {
+    pub fn update(&mut self, message: Message) {
         match message {
-            EuclideanGuiMessage::SetPulses(pulses) => self.set_pulses(pulses),
+            Message::ConfigChange(new_config) => self.config = new_config,
         }
     }
 
-    pub fn view(&self) -> Element<EuclideanGuiMessage> {
+    pub fn view(&self) -> Element<Message> {
         let canvas = Canvas::new(self).width(Length::Fill).height(Length::Fill);
         let content = column![canvas, text!("Sequencer {0}", self.index)];
         container(content)
@@ -46,13 +50,9 @@ impl EuclideanGui {
             .align_y(Center)
             .into()
     }
-
-    fn set_pulses(&mut self, pulses: [bool; 16]) {
-        self.pulses = pulses;
-    }
 }
 
-impl canvas::Program<EuclideanGuiMessage> for EuclideanGui {
+impl canvas::Program<Message> for Gui {
     type State = ();
 
     fn draw(
@@ -65,6 +65,10 @@ impl canvas::Program<EuclideanGuiMessage> for EuclideanGui {
     ) -> Vec<canvas::Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
+        let beat_locations = (0..self.config.pulses)
+            .map(|i| (i * self.config.steps) / self.config.pulses)
+            .collect::<Vec<_>>();
+
         for row in 0..4 {
             for col in 0..4 {
                 let center = Point::new(
@@ -73,7 +77,7 @@ impl canvas::Program<EuclideanGuiMessage> for EuclideanGui {
                 );
 
                 let circle = Path::circle(center, CIRCLE_RADIUS);
-                let color = if self.pulses[4 * row + col] {
+                let color = if beat_locations.contains(&(4 * row + col)) {
                     FILL_COLOR
                 } else {
                     BACKGROUND_COLOR
@@ -85,5 +89,37 @@ impl canvas::Program<EuclideanGuiMessage> for EuclideanGui {
             }
         }
         vec![frame.into_geometry()]
+    }
+}
+
+pub struct ConfigSubscription {
+    rx: mpsc::Receiver<EuclideanSequencerConfig>,
+}
+
+impl ConfigSubscription {
+    pub fn new(rx: mpsc::Receiver<EuclideanSequencerConfig>) -> Self {
+        Self { rx }
+    }
+}
+
+impl subscription::Recipe for ConfigSubscription {
+    type Output = Message;
+
+    fn hash(&self, state: &mut FxHasher) {
+        use std::hash::Hash;
+        std::any::TypeId::of::<Self>().hash(state);
+    }
+
+    fn stream(
+        self: Box<Self>,
+        _input: subscription::EventStream,
+    ) -> iced::advanced::graphics::futures::BoxStream<Self::Output> {
+        let rx = self.rx;
+
+        Box::pin(iced::futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv()
+                .await
+                .map(|config| (Message::ConfigChange(config), rx))
+        }))
     }
 }

@@ -18,8 +18,8 @@ async fn main() -> Result<()> {
     let (tx_input, rx_input) = mpsc::channel(1);
     let (tx_config_a, rx_config_a) = mpsc::channel(1);
     let (tx_gui_a, _) = mpsc::channel(1);
-    let (tx_gui_b, _) = mpsc::channel(1);
     let (tx_config_b, rx_config_b) = mpsc::channel(1);
+    let (tx_gui_b, _) = mpsc::channel(1);
     let (tx_update_mixer, rx_update_mixer) = mpsc::channel(1);
 
     let sequencer_channels = SequencerChannels {

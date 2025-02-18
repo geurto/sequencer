@@ -1,4 +1,4 @@
-use crate::sequencers::euclidean::gui::{EuclideanGui, EuclideanGuiMessage};
+use crate::sequencers::euclidean::gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage};
 use iced::{
     widget::{container, row, Container},
     Element, Length, Subscription, Theme,
