@@ -6,9 +6,9 @@ use std::thread;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::sequencers::euclidean::config::{EuclideanSequencerConfig, EuclideanSequencerInput};
-use crate::sequencers::mixer::config::MixerInput;
-use crate::state::{SequencerChannels, SharedState};
+use crate::sequencers::euclidean::state::EuclideanSequencerInput;
+use crate::sequencers::mixer::state::MixerInput;
+use crate::state::{ActiveSequencer, SharedState};
 
 pub enum Input {
     Bpm(f32),
@@ -60,15 +60,15 @@ pub fn spawn_input_handler(tx: mpsc::Sender<Input>) {
     });
 }
 
-pub async fn process_input(
-    mut rx: mpsc::Receiver<Input>,
-    shared_state: Arc<Mutex<SharedState>>,
-    sequencer_channels: SequencerChannels,
-) {
-    let mut euclidean_config = EuclideanSequencerConfig::new();
+pub async fn process_input(mut rx: mpsc::Receiver<Input>, shared_state: Arc<Mutex<SharedState>>) {
     loop {
         if let Some(input) = rx.recv().await {
             let mut state = shared_state.lock().await;
+            let mut sequencer_config = match state.active_sequencer {
+                ActiveSequencer::Left => state.left_state.clone(),
+                ActiveSequencer::Right => state.right_state.clone(),
+            };
+
             match input {
                 Input::Bpm(bpm) => {
                     info!("Changing BPM to {}", bpm);
@@ -84,36 +84,21 @@ pub async fn process_input(
                     state.change_midi_channel();
                     info!("Changing MIDI channel to {}", state.midi_channel + 1)
                 }
-                Input::Euclidean(euclidean_input) => {
-                    match euclidean_input {
-                        EuclideanSequencerInput::IncreaseSteps => euclidean_config.increase_steps(),
-                        EuclideanSequencerInput::DecreaseSteps => euclidean_config.decrease_steps(),
-                        EuclideanSequencerInput::IncreasePulses => {
-                            euclidean_config.increase_pulses()
-                        }
-                        EuclideanSequencerInput::DecreasePulses => {
-                            euclidean_config.decrease_pulses()
-                        }
-                        EuclideanSequencerInput::IncreasePhase => euclidean_config.increase_phase(),
-                        EuclideanSequencerInput::DecreasePhase => euclidean_config.decrease_phase(),
-                        EuclideanSequencerInput::IncreasePitch => euclidean_config.change_pitch(1),
-                        EuclideanSequencerInput::DecreasePitch => euclidean_config.change_pitch(-1),
-                        EuclideanSequencerInput::IncreaseOctave => {
-                            euclidean_config.change_pitch(12)
-                        }
-                        EuclideanSequencerInput::DecreaseOctave => {
-                            euclidean_config.change_pitch(-12)
-                        }
-                    }
-                    sequencer_channels
-                        .a_tx
-                        .send(euclidean_config.clone())
-                        .await
-                        .unwrap();
-                }
+                Input::Euclidean(euclidean_input) => match euclidean_input {
+                    EuclideanSequencerInput::IncreaseSteps => sequencer_config.increase_steps(),
+                    EuclideanSequencerInput::DecreaseSteps => sequencer_config.decrease_steps(),
+                    EuclideanSequencerInput::IncreasePulses => sequencer_config.increase_pulses(),
+                    EuclideanSequencerInput::DecreasePulses => sequencer_config.decrease_pulses(),
+                    EuclideanSequencerInput::IncreasePhase => sequencer_config.increase_phase(),
+                    EuclideanSequencerInput::DecreasePhase => sequencer_config.decrease_phase(),
+                    EuclideanSequencerInput::IncreasePitch => sequencer_config.change_pitch(1),
+                    EuclideanSequencerInput::DecreasePitch => sequencer_config.change_pitch(-1),
+                    EuclideanSequencerInput::IncreaseOctave => sequencer_config.change_pitch(12),
+                    EuclideanSequencerInput::DecreaseOctave => sequencer_config.change_pitch(-12),
+                },
                 Input::Mixer(mixer_input) => match mixer_input {
-                    MixerInput::IncreaseRatio => state.mixer_config.increase_ratio(),
-                    MixerInput::DecreaseRatio => state.mixer_config.decrease_ratio(),
+                    MixerInput::IncreaseRatio => state.mixer_state.increase_ratio(),
+                    MixerInput::DecreaseRatio => state.mixer_state.decrease_ratio(),
                 },
             }
         }

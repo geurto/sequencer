@@ -14,16 +14,16 @@ pub enum EuclideanSequencerInput {
 }
 
 #[derive(Clone, Debug)]
-pub struct EuclideanSequencerConfig {
+pub struct EuclideanSequencerState {
     pub steps: usize,
     pub pulses: usize,
     pub phase: usize,
     pub pitch: u8,
 }
 
-impl EuclideanSequencerConfig {
+impl EuclideanSequencerState {
     pub fn new() -> Self {
-        EuclideanSequencerConfig {
+        EuclideanSequencerState {
             steps: 16,
             pulses: 0,
             phase: 0,
@@ -76,7 +76,7 @@ impl EuclideanSequencerConfig {
     }
 }
 
-impl Default for EuclideanSequencerConfig {
+impl Default for EuclideanSequencerState {
     fn default() -> Self {
         Self::new()
     }

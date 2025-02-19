@@ -8,16 +8,16 @@ pub enum MixerInput {
 }
 
 #[derive(Debug)]
-pub struct MixerConfig {
+pub struct MixerState {
     pub ratio: f32,
     pub sequence_a: Sequence,
     pub sequence_b: Sequence,
     pub mixed_sequence: Sequence,
 }
 
-impl MixerConfig {
+impl MixerState {
     pub fn new() -> Self {
-        MixerConfig {
+        MixerState {
             ratio: 0.5,
             sequence_a: Sequence::empty(),
             sequence_b: Sequence::empty(),
@@ -46,7 +46,7 @@ impl MixerConfig {
     }
 }
 
-impl Default for MixerConfig {
+impl Default for MixerState {
     fn default() -> Self {
         Self::new()
     }

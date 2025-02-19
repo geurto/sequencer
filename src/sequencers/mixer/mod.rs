@@ -1,11 +1,11 @@
-pub mod config;
+pub mod state;
 
-use log::debug;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::sync::mpsc::Receiver;
 use crate::note::Sequence;
 use crate::state::SharedState;
+use log::debug;
+use std::sync::Arc;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::Mutex;
 
 pub struct Mixer {
     update_rx: Receiver<()>,
@@ -14,7 +14,10 @@ pub struct Mixer {
 
 impl Mixer {
     pub fn new(update_rx: Receiver<()>, shared_state: Arc<Mutex<SharedState>>) -> Self {
-        Mixer { update_rx, shared_state }
+        Mixer {
+            update_rx,
+            shared_state,
+        }
     }
 
     pub async fn run(&mut self) {
@@ -33,16 +36,16 @@ impl Mixer {
         let mut state = self.shared_state.lock().await;
 
         let mut mixed_sequence = Sequence::empty();
-        let num_notes = state.mixer_config.sequence_a.notes.len();
+        let num_notes = state.mixer_state.sequence_a.notes.len();
 
         for i in 0..num_notes {
-            let note_a = state.mixer_config.sequence_a.notes.get(i);
+            let note_a = state.mixer_state.sequence_a.notes.get(i);
 
             if let Some(note_a) = note_a {
                 let note = note_a.clone();
                 mixed_sequence.notes.push(note);
             }
         }
-        state.mixer_config.mixed_sequence = mixed_sequence;
+        state.mixer_state.mixed_sequence = mixed_sequence;
     }
 }

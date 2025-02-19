@@ -1,12 +1,11 @@
-use iced::advanced::subscription;
-use iced::widget::canvas::{self, Canvas, Frame, Path};
-use iced::widget::{column, container, text};
-use iced::Alignment::Center;
-use iced::{Color, Element, Length, Point, Renderer, Subscription};
-use rustc_hash::FxHasher;
-use tokio::sync::mpsc;
+use iced::{
+    widget::canvas::{self, Canvas, Frame, Path},
+    widget::{column, container, text},
+    Alignment::Center,
+    Color, Element, Length, Point, Renderer, Subscription,
+};
 
-use super::config::EuclideanSequencerConfig;
+use super::state::EuclideanSequencerState;
 
 const FILL_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
 const BACKGROUND_COLOR: Color = Color::from_rgb(0., 0., 0.);
@@ -15,28 +14,28 @@ const CIRCLE_SPACING: f32 = 60.0;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    ConfigChange(EuclideanSequencerConfig),
+    StateChange(EuclideanSequencerState),
 }
 
 pub struct Gui {
-    config: EuclideanSequencerConfig,
+    config: EuclideanSequencerState,
     index: usize,
 }
 
 impl Gui {
     pub fn new(index: usize) -> Self {
         Self {
-            config: EuclideanSequencerConfig::new(),
+            config: EuclideanSequencerState::new(),
             index,
         }
     }
-    pub fn subscription(&self) -> Subscription<Message> {
+    pub fn subscription(&mut self) -> Subscription<Message> {
         Subscription::none()
     }
 
     pub fn update(&mut self, message: Message) {
         match message {
-            Message::ConfigChange(new_config) => self.config = new_config,
+            Message::StateChange(new_config) => self.config = new_config,
         }
     }
 
@@ -89,37 +88,5 @@ impl canvas::Program<Message> for Gui {
             }
         }
         vec![frame.into_geometry()]
-    }
-}
-
-pub struct ConfigSubscription {
-    rx: mpsc::Receiver<EuclideanSequencerConfig>,
-}
-
-impl ConfigSubscription {
-    pub fn new(rx: mpsc::Receiver<EuclideanSequencerConfig>) -> Self {
-        Self { rx }
-    }
-}
-
-impl subscription::Recipe for ConfigSubscription {
-    type Output = Message;
-
-    fn hash(&self, state: &mut FxHasher) {
-        use std::hash::Hash;
-        std::any::TypeId::of::<Self>().hash(state);
-    }
-
-    fn stream(
-        self: Box<Self>,
-        _input: subscription::EventStream,
-    ) -> iced::advanced::graphics::futures::BoxStream<Self::Output> {
-        let rx = self.rx;
-
-        Box::pin(iced::futures::stream::unfold(rx, |mut rx| async move {
-            rx.recv()
-                .await
-                .map(|config| (Message::ConfigChange(config), rx))
-        }))
     }
 }

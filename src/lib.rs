@@ -11,4 +11,4 @@ pub use input::{process_input, spawn_input_handler};
 pub use midi::MidiHandler;
 pub use playback::play;
 pub use sequencers::{euclidean::EuclideanSequencer, mixer::Mixer, traits::Sequencer};
-pub use state::{SequencerChannels, SharedState};
+pub use state::SharedState;

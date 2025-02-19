@@ -1,5 +1,6 @@
 use anyhow::Result;
 use env_logger::Builder;
+use iced::Settings;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::{mpsc, Mutex};
@@ -74,7 +75,7 @@ async fn main() -> Result<()> {
     spawn_input_handler(tx_input.clone());
     let shared_state_input = shared_state.clone();
     handles.push(tokio::spawn(async move {
-        process_input(rx_input, shared_state_input, sequencer_channels).await;
+        process_input(rx_input, shared_state_input).await;
     }));
 
     // Playback

@@ -1,8 +1,8 @@
-pub mod config;
 pub mod gui;
+pub mod state;
 
 use crate::note::{Note, NoteDuration, Sequence};
-use crate::sequencers::euclidean::config::EuclideanSequencerConfig;
+use crate::sequencers::euclidean::state::EuclideanSequencerState;
 use crate::sequencers::traits::Sequencer;
 
 use crate::state::SharedState;
@@ -13,21 +13,21 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
 pub struct EuclideanSequencer {
-    config: EuclideanSequencerConfig,
-    config_rx: mpsc::Receiver<EuclideanSequencerConfig>,
-    gui_tx: mpsc::Sender<EuclideanSequencerConfig>,
+    config: EuclideanSequencerState,
+    config_rx: mpsc::Receiver<EuclideanSequencerState>,
+    gui_tx: mpsc::Sender<EuclideanSequencerState>,
     mixer_update_tx: mpsc::Sender<()>,
     shared_state: Arc<Mutex<SharedState>>,
 }
 
 impl EuclideanSequencer {
     pub fn new(
-        config_rx: mpsc::Receiver<EuclideanSequencerConfig>,
-        gui_tx: mpsc::Sender<EuclideanSequencerConfig>,
+        config_rx: mpsc::Receiver<EuclideanSequencerState>,
+        gui_tx: mpsc::Sender<EuclideanSequencerState>,
         mixer_update_tx: mpsc::Sender<()>,
         shared_state: Arc<Mutex<SharedState>>,
     ) -> Self {
-        let config = EuclideanSequencerConfig::new();
+        let config = EuclideanSequencerState::new();
         EuclideanSequencer {
             config,
             config_rx,
@@ -92,8 +92,8 @@ impl Sequencer for EuclideanSequencer {
                 {
                     let mut state = self.shared_state.lock().await;
                     match sequencer_slot {
-                        0 => state.mixer_config.sequence_a = sequence,
-                        1 => state.mixer_config.sequence_b = sequence,
+                        0 => state.mixer_state.sequence_a = sequence,
+                        1 => state.mixer_state.sequence_b = sequence,
                         _ => anyhow::bail!("Invalid sequencer slot"),
                     }
                 }

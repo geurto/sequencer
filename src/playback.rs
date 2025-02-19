@@ -1,20 +1,23 @@
 use anyhow::Error;
 use log::{debug, info};
-use tokio::sync::Mutex;
 use std::sync::Arc;
-use tokio::time::{Duration, sleep};
+use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 
-use crate::state::*;
 use crate::midi::MidiHandler;
+use crate::state::*;
 
-pub async fn play(midi_handler: Arc<Mutex<MidiHandler>>, shared_state: Arc<Mutex<SharedState>>) -> Result<(), Error> {
+pub async fn play(
+    midi_handler: Arc<Mutex<MidiHandler>>,
+    shared_state: Arc<Mutex<SharedState>>,
+) -> Result<(), Error> {
     info!("Starting playback loop");
     let mut current_note_index = 0;
 
     loop {
         let state = shared_state.lock().await;
         if state.playing {
-            let sequence = state.mixer_config.mixed_sequence.clone();
+            let sequence = state.mixer_state.mixed_sequence.clone();
             if sequence.notes.is_empty() {
                 drop(state);
                 sleep(Duration::from_millis(10)).await;
@@ -26,7 +29,8 @@ pub async fn play(midi_handler: Arc<Mutex<MidiHandler>>, shared_state: Arc<Mutex
 
             let mut midi = midi_handler.lock().await;
             let note_duration = note.duration as u64;
-            midi.play_note(note.pitch, note_duration, note.velocity, state.midi_channel).await;
+            midi.play_note(note.pitch, note_duration, note.velocity, state.midi_channel)
+                .await;
 
             // Move to the next note
             current_note_index = (current_note_index + 1) % sequence.notes.len();
@@ -37,3 +41,4 @@ pub async fn play(midi_handler: Arc<Mutex<MidiHandler>>, shared_state: Arc<Mutex
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
 }
+
