@@ -1,9 +1,14 @@
 use iced::{
+    advanced::subscription,
     widget::canvas::{self, Canvas, Frame, Path},
     widget::{column, container, text},
     Alignment::Center,
     Color, Element, Length, Point, Renderer, Subscription,
 };
+
+use rustc_hash::FxHasher;
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
 
 use super::state::EuclideanSequencerState;
 
@@ -18,24 +23,28 @@ pub enum Message {
 }
 
 pub struct Gui {
-    config: EuclideanSequencerState,
+    state: EuclideanSequencerState,
+    rx_state: Arc<Mutex<mpsc::Receiver<EuclideanSequencerState>>>,
     index: usize,
 }
 
 impl Gui {
-    pub fn new(index: usize) -> Self {
+    fn new(rx_state: mpsc::Receiver<EuclideanSequencerState>) -> Self {
         Self {
-            config: EuclideanSequencerState::new(),
+            state: EuclideanSequencerState::new(),
+            rx_state: Arc::new(Mutex::new(rx_state)),
             index,
         }
     }
-    pub fn subscription(&mut self) -> Subscription<Message> {
-        Subscription::none()
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        let rx = self.rx_state.clone();
+        iced::advanced::subscription::from_recipe(StateSubscription::new(rx))
     }
 
     pub fn update(&mut self, message: Message) {
         match message {
-            Message::StateChange(new_config) => self.config = new_config,
+            Message::StateChange(state) => {}
         }
     }
 
@@ -64,8 +73,8 @@ impl canvas::Program<Message> for Gui {
     ) -> Vec<canvas::Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        let beat_locations = (0..self.config.pulses)
-            .map(|i| (i * self.config.steps) / self.config.pulses)
+        let beat_locations = (0..self.state.pulses)
+            .map(|i| (i * self.state.steps) / self.state.pulses)
             .collect::<Vec<_>>();
 
         for row in 0..4 {
@@ -88,5 +97,42 @@ impl canvas::Program<Message> for Gui {
             }
         }
         vec![frame.into_geometry()]
+    }
+}
+
+pub struct StateSubscription {
+    rx: Arc<Mutex<mpsc::Receiver<EuclideanSequencerState>>>,
+}
+
+impl StateSubscription {
+    pub fn new(rx: Arc<Mutex<mpsc::Receiver<EuclideanSequencerState>>>) -> Self {
+        Self { rx }
+    }
+}
+
+impl subscription::Recipe for StateSubscription {
+    type Output = Message;
+
+    fn hash(&self, state: &mut FxHasher) {
+        use std::hash::Hash;
+        std::any::TypeId::of::<Self>().hash(state);
+    }
+
+    fn stream(
+        self: Box<Self>,
+        _input: subscription::EventStream,
+    ) -> iced::advanced::graphics::futures::BoxStream<Self::Output> {
+        use iced::futures::{stream, StreamExt};
+
+        let rx = self.rx;
+
+        stream::unfold(rx, move |rx| async move {
+            let next_state = {
+                let mut guard = rx.lock().await;
+                guard.recv().await
+            };
+            next_state.map(|state| (Message::StateChange(state), rx))
+        })
+        .boxed()
     }
 }

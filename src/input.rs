@@ -5,7 +5,6 @@ use std::collections::HashSet;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 
-use crate::gui::Message as GuiMessage;
 use crate::sequencers::euclidean::state::{EuclideanSequencerInput, EuclideanSequencerState};
 use crate::sequencers::mixer::state::{MixerInput, MixerState};
 use crate::state::{ActiveSequencer, SharedState};

@@ -9,21 +9,21 @@ pub struct Mixer {
     state: MixerState,
     sequences: (Sequence, Sequence),
     rx_sequence: Receiver<(Option<Sequence>, Option<Sequence>)>,
-    tx_sequence: Sender<Sequence>,
+    tx_mixed_sequence: Sender<Sequence>,
     rx_update: Receiver<MixerState>,
 }
 
 impl Mixer {
     pub fn new(
         rx_sequence: Receiver<(Option<Sequence>, Option<Sequence>)>,
-        tx_sequence: Sender<Sequence>,
+        tx_mixed_sequence: Sender<Sequence>,
         rx_update: Receiver<MixerState>,
     ) -> Self {
         Mixer {
             state: MixerState::default(),
             sequences: (Sequence::default(), Sequence::default()),
             rx_sequence,
-            tx_sequence,
+            tx_mixed_sequence,
             rx_update,
         }
     }
@@ -63,6 +63,6 @@ impl Mixer {
                 mixed_sequence.notes.push(note);
             }
         }
-        self.tx_sequence.send(mixed_sequence);
+        self.tx_mixed_sequence.send(mixed_sequence);
     }
 }
