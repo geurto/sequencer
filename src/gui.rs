@@ -1,8 +1,5 @@
 use crate::{
-    sequencers::euclidean::{
-        gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage},
-        state::EuclideanSequencerState,
-    },
+    sequencers::euclidean::gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage},
     state::SharedState,
 };
 use iced::{
@@ -11,7 +8,8 @@ use iced::{
     Element, Length, Subscription, Theme,
 };
 use rustc_hash::FxHasher;
-use tokio::sync::mpsc;
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
 
 #[derive(Debug)]
 pub enum Message {
@@ -19,9 +17,8 @@ pub enum Message {
 }
 
 pub struct Gui {
-    // config_rx is an Option in order to consume it when creating the Subscription.
-    // mpsc::Receiver does not allow cloning, so this is the best way to pass it through.
-    config_rx: Option<mpsc::Receiver<SharedState>>,
+    // We wrap the mpsc receiver in an Arc<Mutex<>> so that it can be shared
+    config_rx: Arc<Mutex<mpsc::Receiver<SharedState>>>,
     sequencer_left: EuclideanGui,
     sequencer_right: EuclideanGui,
 }
@@ -29,17 +26,14 @@ pub struct Gui {
 impl Gui {
     fn new(config_rx: mpsc::Receiver<SharedState>) -> Self {
         Self {
-            config_rx: Some(config_rx),
+            config_rx: Arc::new(Mutex::new(config_rx)),
             sequencer_left: EuclideanGui::new(1),
             sequencer_right: EuclideanGui::new(2),
         }
     }
-    pub fn subscription(&mut self) -> Subscription<Message> {
-        if let Some(rx) = self.config_rx.take() {
-            iced::advanced::subscription::from_recipe(StateSubscription::new(rx))
-        } else {
-            Subscription::none()
-        }
+    pub fn subscription(&self) -> Subscription<Message> {
+        let rx = self.config_rx.clone();
+        iced::advanced::subscription::from_recipe(StateSubscription::new(rx))
     }
 
     pub fn update(&mut self, message: Message) {
@@ -97,11 +91,11 @@ impl Gui {
 }
 
 pub struct StateSubscription {
-    rx: mpsc::Receiver<SharedState>,
+    rx: Arc<Mutex<mpsc::Receiver<SharedState>>>,
 }
 
 impl StateSubscription {
-    pub fn new(rx: mpsc::Receiver<SharedState>) -> Self {
+    pub fn new(rx: Arc<Mutex<mpsc::Receiver<SharedState>>>) -> Self {
         Self { rx }
     }
 }
@@ -118,12 +112,23 @@ impl subscription::Recipe for StateSubscription {
         self: Box<Self>,
         _input: subscription::EventStream,
     ) -> iced::advanced::graphics::futures::BoxStream<Self::Output> {
+        use iced::futures::{stream, StreamExt};
+
         let rx = self.rx;
 
-        Box::pin(iced::futures::stream::unfold(rx, |mut rx| async move {
-            rx.recv()
-                .await
-                .map(|state| (Message::StateChange(state), rx))
-        }))
+        stream::unfold(rx, move |rx| async move {
+            let next_state = {
+                let mut guard = rx.lock().await;
+                guard.recv().await
+            };
+
+            //if let Some(state) = next_state {
+            //    Some((Message::StateChange(state), rx))
+            //} else {
+            //    None
+            //}
+            next_state.map(|state| (Message::StateChange(state), rx))
+        })
+        .boxed()
     }
 }

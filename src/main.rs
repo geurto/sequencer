@@ -1,6 +1,5 @@
 use anyhow::Result;
 use env_logger::Builder;
-use iced::Settings;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::{mpsc, Mutex};
@@ -8,7 +7,7 @@ use tokio::sync::{mpsc, Mutex};
 use sequencer::{
     input::{process_input, spawn_input_handler},
     playback::play,
-    EuclideanSequencer, Gui, MidiHandler, Mixer, Sequencer, SequencerChannels, SharedState,
+    EuclideanSequencer, Gui, MidiHandler, Mixer, Sequencer, SharedState,
 };
 
 #[tokio::main]
@@ -18,16 +17,9 @@ async fn main() -> Result<()> {
     // tokio channels
     let (tx_input, rx_input) = mpsc::channel(1);
     let (tx_config_a, rx_config_a) = mpsc::channel(1);
-    let (tx_gui_a, _) = mpsc::channel(1);
     let (tx_config_b, rx_config_b) = mpsc::channel(1);
-    let (tx_gui_b, _) = mpsc::channel(1);
     let (tx_update_mixer, rx_update_mixer) = mpsc::channel(1);
-
-    let sequencer_channels = SequencerChannels {
-        a_tx: tx_config_a,
-        b_tx: tx_config_b,
-        mixer_tx: tx_update_mixer.clone(),
-    };
+    let (tx_gui, rx_gui) = mpsc::channel(1);
 
     let shared_state = Arc::new(Mutex::new(SharedState::new(120.0)));
 
@@ -44,7 +36,7 @@ async fn main() -> Result<()> {
     // Sequencers and mixer
     let mut sequencer_a = EuclideanSequencer::new(
         rx_config_a,
-        tx_gui_a,
+        tx_gui,
         tx_update_mixer.clone(),
         shared_state.clone(),
     );
@@ -56,7 +48,7 @@ async fn main() -> Result<()> {
     // both Euclidean for now to keep it simple
     let mut sequencer_b = EuclideanSequencer::new(
         rx_config_b,
-        tx_gui_b,
+        tx_gui,
         tx_update_mixer.clone(),
         shared_state.clone(),
     );
@@ -97,6 +89,6 @@ async fn main() -> Result<()> {
     });
 
     // GUI
-    Gui::run()?;
+    Gui::run(rx_gui)?;
     Ok(())
 }
