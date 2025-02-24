@@ -7,8 +7,8 @@ pub mod sequencers;
 pub mod state;
 
 pub use gui::Gui;
-pub use input::{process_input, spawn_input_handler};
+pub use input::InputHandler;
 pub use midi::MidiHandler;
 pub use playback::play;
-pub use sequencers::{euclidean::EuclideanSequencer, mixer::Mixer, traits::Sequencer};
+pub use sequencers::{common::Sequencer, euclidean::EuclideanSequencer, mixer::Mixer};
 pub use state::SharedState;

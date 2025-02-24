@@ -2,37 +2,37 @@ pub mod gui;
 pub mod state;
 
 use crate::note::{Note, NoteDuration, Sequence};
+use crate::sequencers::common::Sequencer;
 use crate::sequencers::euclidean::state::EuclideanSequencerState;
-use crate::sequencers::traits::Sequencer;
 
 use crate::state::SharedState;
 use anyhow::Result;
 use log::{debug, error};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 pub struct EuclideanSequencer {
     config: EuclideanSequencerState,
-    config_rx: mpsc::Receiver<EuclideanSequencerState>,
-    gui_tx: mpsc::Sender<EuclideanSequencerState>,
-    mixer_update_tx: mpsc::Sender<()>,
-    shared_state: Arc<Mutex<SharedState>>,
+    rx_config: mpsc::Receiver<EuclideanSequencerState>,
+    tx_gui: mpsc::Sender<EuclideanSequencerState>,
+    tx_sequence: mpsc::Sender<(Option<Sequence>, Option<Sequence>)>,
+    shared_state: Arc<RwLock<SharedState>>,
 }
 
 impl EuclideanSequencer {
     pub fn new(
-        config_rx: mpsc::Receiver<EuclideanSequencerState>,
-        gui_tx: mpsc::Sender<EuclideanSequencerState>,
-        mixer_update_tx: mpsc::Sender<()>,
-        shared_state: Arc<Mutex<SharedState>>,
+        rx_config: mpsc::Receiver<EuclideanSequencerState>,
+        tx_gui: mpsc::Sender<EuclideanSequencerState>,
+        tx_sequence: mpsc::Sender<(Option<Sequence>, Option<Sequence>)>,
+        shared_state: Arc<RwLock<SharedState>>,
     ) -> Self {
         let config = EuclideanSequencerState::new();
         EuclideanSequencer {
             config,
-            config_rx,
-            gui_tx,
-            mixer_update_tx,
+            rx_config,
+            tx_gui,
+            tx_sequence,
             shared_state,
         }
     }
@@ -48,7 +48,7 @@ impl Sequencer for EuclideanSequencer {
                 0,
                 0,
                 NoteDuration::Sixteenth,
-                self.shared_state.lock().await.bpm,
+                self.shared_state.read().await.bpm,
             );
             sequence.notes.push(note);
             return sequence;
@@ -65,14 +65,14 @@ impl Sequencer for EuclideanSequencer {
                     self.config.pitch,
                     100,
                     NoteDuration::Sixteenth,
-                    self.shared_state.lock().await.bpm,
+                    self.shared_state.read().await.bpm,
                 )
             } else {
                 Note::new(
                     0,
                     0,
                     NoteDuration::Sixteenth,
-                    self.shared_state.lock().await.bpm,
+                    self.shared_state.read().await.bpm,
                 )
             };
             sequence.notes.push(note);
@@ -82,22 +82,20 @@ impl Sequencer for EuclideanSequencer {
 
     async fn run(&mut self, sequencer_slot: usize) -> Result<()> {
         loop {
-            if let Some(config) = self.config_rx.recv().await {
+            if let Some(config) = self.rx_config.recv().await {
                 debug!("Euclidean sequencer received config: {:?}", config);
                 self.config = config.clone();
-                if let Err(e) = self.gui_tx.send(config).await {
+                if let Err(e) = self.tx_gui.send(config).await {
                     error!("Error sending GUI message: {}", e);
                 }
                 let sequence = self.generate_sequence().await;
                 {
-                    let mut state = self.shared_state.lock().await;
                     match sequencer_slot {
-                        0 => state.mixer_state.sequence_a = sequence,
-                        1 => state.mixer_state.sequence_b = sequence,
+                        0 => self.tx_sequence.send((Some(sequence), None)).await?,
+                        1 => self.tx_sequence.send((None, Some(sequence))).await?,
                         _ => anyhow::bail!("Invalid sequencer slot"),
-                    }
+                    };
                 }
-                self.mixer_update_tx.send(()).await?;
             }
 
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

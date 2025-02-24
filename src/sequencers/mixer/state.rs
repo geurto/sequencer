@@ -1,5 +1,3 @@
-use crate::note::Sequence;
-
 use log::debug;
 
 pub enum MixerInput {
@@ -7,22 +5,14 @@ pub enum MixerInput {
     DecreaseRatio,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MixerState {
     pub ratio: f32,
-    pub sequence_a: Sequence,
-    pub sequence_b: Sequence,
-    pub mixed_sequence: Sequence,
 }
 
 impl MixerState {
     pub fn new() -> Self {
-        MixerState {
-            ratio: 0.5,
-            sequence_a: Sequence::empty(),
-            sequence_b: Sequence::empty(),
-            mixed_sequence: Sequence::empty(),
-        }
+        MixerState { ratio: 0.5 }
     }
 
     pub fn increase_ratio(&mut self) {
@@ -33,16 +23,6 @@ impl MixerState {
     pub fn decrease_ratio(&mut self) {
         self.ratio = (self.ratio - 0.05).clamp(0.0, 1.0);
         debug!("Mixer ratio decreased to {}", self.ratio);
-    }
-
-    pub fn update_sequence_a(&mut self, sequence: Sequence) {
-        self.sequence_a = sequence;
-        debug!("Updated sequence A");
-    }
-
-    pub fn update_sequence_b(&mut self, sequence: Sequence) {
-        self.sequence_b = sequence;
-        debug!("Updated sequence B");
     }
 }
 

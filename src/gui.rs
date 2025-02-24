@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, Mutex};
 
 #[derive(Debug)]
 pub enum Message {
-    StateChange(SharedState),
+    Tick,
 }
 
 pub struct Gui {

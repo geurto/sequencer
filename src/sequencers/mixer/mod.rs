@@ -1,30 +1,48 @@
 pub mod state;
 
 use crate::note::Sequence;
-use crate::state::SharedState;
 use log::debug;
-use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
-use tokio::sync::Mutex;
+use state::MixerState;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 pub struct Mixer {
-    update_rx: Receiver<()>,
-    shared_state: Arc<Mutex<SharedState>>,
+    state: MixerState,
+    sequences: (Sequence, Sequence),
+    rx_sequence: Receiver<(Option<Sequence>, Option<Sequence>)>,
+    tx_sequence: Sender<Sequence>,
+    rx_update: Receiver<MixerState>,
 }
 
 impl Mixer {
-    pub fn new(update_rx: Receiver<()>, shared_state: Arc<Mutex<SharedState>>) -> Self {
+    pub fn new(
+        rx_sequence: Receiver<(Option<Sequence>, Option<Sequence>)>,
+        tx_sequence: Sender<Sequence>,
+        rx_update: Receiver<MixerState>,
+    ) -> Self {
         Mixer {
-            update_rx,
-            shared_state,
+            state: MixerState::default(),
+            sequences: (Sequence::default(), Sequence::default()),
+            rx_sequence,
+            tx_sequence,
+            rx_update,
         }
     }
 
     pub async fn run(&mut self) {
         loop {
-            if let Some(()) = self.update_rx.recv().await {
+            if let Some(state) = self.rx_update.recv().await {
                 debug!("Mixer received update request");
+                self.state = state;
                 self.mix().await;
+            }
+
+            if let Some(sequences) = self.rx_sequence.recv().await {
+                match sequences {
+                    (Some(left), Some(right)) => self.sequences = (left, right),
+                    (Some(left), None) => self.sequences = (left, self.sequences.1.clone()),
+                    (None, Some(right)) => self.sequences = (self.sequences.0.clone(), right),
+                    (None, None) => {}
+                }
             }
 
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -33,19 +51,18 @@ impl Mixer {
 
     pub async fn mix(&mut self) {
         // TODO: implement normally
-        let mut state = self.shared_state.lock().await;
 
         let mut mixed_sequence = Sequence::empty();
-        let num_notes = state.mixer_state.sequence_a.notes.len();
+        let num_notes = self.sequences.0.notes.len();
 
         for i in 0..num_notes {
-            let note_a = state.mixer_state.sequence_a.notes.get(i);
+            let note_a = self.sequences.0.notes.get(i);
 
             if let Some(note_a) = note_a {
                 let note = note_a.clone();
                 mixed_sequence.notes.push(note);
             }
         }
-        state.mixer_state.mixed_sequence = mixed_sequence;
+        self.tx_sequence.send(mixed_sequence);
     }
 }
