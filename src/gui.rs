@@ -66,7 +66,7 @@ impl Gui {
             .into()
     }
 
-    pub fn run(state_rx: mpsc::Receiver<SharedState>) -> iced::Result {
+    pub fn run(left: EuclideanGui, right: EuclideanGui) -> iced::Result {
         iced::application("Sequencer", Gui::update, Gui::view)
             .subscription(|gui| gui.subscription())
             .theme(|_| Theme::Dark)

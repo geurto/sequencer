@@ -7,8 +7,7 @@ use iced::{
 };
 
 use rustc_hash::FxHasher;
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::broadcast;
 
 use super::state::EuclideanSequencerState;
 
@@ -24,27 +23,30 @@ pub enum Message {
 
 pub struct Gui {
     state: EuclideanSequencerState,
-    rx_state: Arc<Mutex<mpsc::Receiver<EuclideanSequencerState>>>,
+    rx_state: broadcast::Receiver<EuclideanSequencerState>,
     index: usize,
 }
 
 impl Gui {
-    fn new(rx_state: mpsc::Receiver<EuclideanSequencerState>) -> Self {
+    pub fn new(index: usize, rx_state: broadcast::Receiver<EuclideanSequencerState>) -> Self {
         Self {
             state: EuclideanSequencerState::new(),
-            rx_state: Arc::new(Mutex::new(rx_state)),
+            rx_state,
             index,
         }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let rx = self.rx_state.clone();
-        iced::advanced::subscription::from_recipe(StateSubscription::new(rx))
+        iced::advanced::subscription::from_recipe(StateSubscription::new(
+            self.rx_state.resubscribe(),
+        ))
     }
 
     pub fn update(&mut self, message: Message) {
         match message {
-            Message::StateChange(state) => {}
+            Message::StateChange(new_state) => {
+                self.state = new_state;
+            }
         }
     }
 
@@ -101,11 +103,11 @@ impl canvas::Program<Message> for Gui {
 }
 
 pub struct StateSubscription {
-    rx: Arc<Mutex<mpsc::Receiver<EuclideanSequencerState>>>,
+    rx: broadcast::Receiver<EuclideanSequencerState>,
 }
 
 impl StateSubscription {
-    pub fn new(rx: Arc<Mutex<mpsc::Receiver<EuclideanSequencerState>>>) -> Self {
+    pub fn new(rx: broadcast::Receiver<EuclideanSequencerState>) -> Self {
         Self { rx }
     }
 }
@@ -126,11 +128,8 @@ impl subscription::Recipe for StateSubscription {
 
         let rx = self.rx;
 
-        stream::unfold(rx, move |rx| async move {
-            let next_state = {
-                let mut guard = rx.lock().await;
-                guard.recv().await
-            };
+        stream::unfold(rx, move |mut rx| async move {
+            let next_state = rx.recv().await.ok();
             next_state.map(|state| (Message::StateChange(state), rx))
         })
         .boxed()

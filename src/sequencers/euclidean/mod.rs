@@ -7,7 +7,7 @@ use crate::sequencers::euclidean::state::EuclideanSequencerState;
 
 use crate::state::SharedState;
 use anyhow::Result;
-use log::{debug, error};
+use log::debug;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
@@ -15,7 +15,6 @@ use tokio::sync::RwLock;
 pub struct EuclideanSequencer {
     config: EuclideanSequencerState,
     rx_config: mpsc::Receiver<EuclideanSequencerState>,
-    tx_gui: mpsc::Sender<EuclideanSequencerState>,
     tx_sequence: mpsc::Sender<(Option<Sequence>, Option<Sequence>)>,
     shared_state: Arc<RwLock<SharedState>>,
 }
@@ -23,7 +22,6 @@ pub struct EuclideanSequencer {
 impl EuclideanSequencer {
     pub fn new(
         rx_config: mpsc::Receiver<EuclideanSequencerState>,
-        tx_gui: mpsc::Sender<EuclideanSequencerState>,
         tx_sequence: mpsc::Sender<(Option<Sequence>, Option<Sequence>)>,
         shared_state: Arc<RwLock<SharedState>>,
     ) -> Self {
@@ -31,7 +29,6 @@ impl EuclideanSequencer {
         EuclideanSequencer {
             config,
             rx_config,
-            tx_gui,
             tx_sequence,
             shared_state,
         }
@@ -85,9 +82,6 @@ impl Sequencer for EuclideanSequencer {
             if let Some(config) = self.rx_config.recv().await {
                 debug!("Euclidean sequencer received config: {:?}", config);
                 self.config = config.clone();
-                if let Err(e) = self.tx_gui.send(config).await {
-                    error!("Error sending GUI message: {}", e);
-                }
                 let sequence = self.generate_sequence().await;
                 {
                     match sequencer_slot {
