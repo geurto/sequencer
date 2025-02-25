@@ -3,12 +3,12 @@ use device_query::Keycode;
 use env_logger::Builder;
 use std::{collections::HashSet, sync::Arc};
 use tokio::signal;
-use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
+use tokio::sync::{broadcast, mpsc, RwLock};
 
 use sequencer::{
-    playback::play, run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui,
-    start_polling, EuclideanSequencer, EuclideanSequencerState, Gui, MidiHandler, Mixer,
-    MixerState, Sequence, Sequencer, SharedState,
+    run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui, start_polling,
+    EuclideanSequencer, EuclideanSequencerState, Gui, MidiHandler, Mixer, MixerState,
+    PlaybackHandler, Sequence, Sequencer, SharedState,
 };
 
 #[tokio::main]
@@ -35,23 +35,13 @@ async fn main() -> Result<()> {
 
     let shared_state: Arc<RwLock<SharedState>> = Arc::new(RwLock::new(SharedState::new(120.)));
 
-    // MIDI input and output
-    let midi_handler = Arc::new(Mutex::new(MidiHandler::new()?));
-    midi_handler
-        .lock()
-        .await
-        .setup_midi_input(shared_state.clone())
-        .await?;
-
-    let mut handles = vec![];
-
     // Sequencers and mixer
     let mut sequencer_a =
         EuclideanSequencer::new(rx_sequencer_left, tx_sequence.clone(), shared_state.clone());
     sequencer_a.generate_sequence().await;
-    handles.push(tokio::spawn(async move {
+    tokio::spawn(async move {
         sequencer_a.run(0).await.unwrap();
-    }));
+    });
 
     // both Euclidean for now to keep it simple
     let mut sequencer_b = EuclideanSequencer::new(
@@ -60,37 +50,32 @@ async fn main() -> Result<()> {
         shared_state.clone(),
     );
     sequencer_b.generate_sequence().await;
-    handles.push(tokio::spawn(async move {
-        sequencer_b.run(1).await.unwrap();
-    }));
+    tokio::spawn(async move { sequencer_b.run(1).await });
 
     let mut sequence_mixer = Mixer::new(rx_sequence, tx_mixed_sequence, rx_mixer);
     sequence_mixer.mix().await;
-    handles.push(tokio::spawn(async move {
-        sequence_mixer.run().await;
-    }));
+    tokio::spawn(async move { sequence_mixer.run().await });
 
     // Input handling
     start_polling(tx_keys);
     let shared_state_input = shared_state.clone();
-    handles.push(tokio::spawn(async move {
-        let _ = run_input_handler(
+    tokio::spawn(async move {
+        run_input_handler(
             rx_keys,
             shared_state_input,
             tx_sequencer_left,
             tx_sequencer_right,
             tx_mixer,
         )
-        .await;
-    }));
+        .await
+    });
 
     // Playback
-    let midi_handler_clone = midi_handler.clone();
-    handles.push(tokio::spawn(async move {
-        play(midi_handler_clone, rx_mixed_sequence, shared_state.clone())
-            .await
-            .unwrap();
-    }));
+
+    let midi_handler = MidiHandler::new()?;
+    let mut playback_handler =
+        PlaybackHandler::new(midi_handler, rx_mixed_sequence, shared_state.clone());
+    tokio::spawn(async move { playback_handler.run().await });
 
     // Shutdown
     let _ctrl_c_handle = tokio::spawn(async move {

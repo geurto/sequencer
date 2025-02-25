@@ -1,6 +1,6 @@
 use crate::state::SharedState;
 
-use anyhow::{anyhow, Context, Error};
+use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use std::sync::Arc;
@@ -17,7 +17,7 @@ const NOTE_ON_MSG: u8 = 0x90;
 const NOTE_OFF_MSG: u8 = 0x80;
 
 impl MidiHandler {
-    pub fn new() -> Result<Self, Error> {
+    pub fn new() -> Result<Self> {
         let midi_out = MidiOutput::new("My MIDI Output")?;
         let out_ports = midi_out.ports();
 
@@ -45,6 +45,7 @@ impl MidiHandler {
         let conn_out = midi_out
             .connect(out_port, "gen-seq")
             .map_err(|e| anyhow!("Failed to connect to MIDI output: {}", e))?;
+
         Ok(Self {
             conn_out,
             conn_in: None,
@@ -52,15 +53,16 @@ impl MidiHandler {
     }
 
     pub async fn play_note(&mut self, note: u8, duration: u64, velocity: u8, channel: u8) {
-        let _ = self.conn_out.send(&[NOTE_ON_MSG, note, velocity, channel]);
+        self.conn_out
+            .send(&[NOTE_ON_MSG, note, velocity, channel])
+            .expect("Failed to send NOTE_ON_MSG");
         sleep(Duration::from_millis(duration)).await;
-        let _ = self.conn_out.send(&[NOTE_OFF_MSG, note, velocity, channel]);
+        self.conn_out
+            .send(&[NOTE_OFF_MSG, note, velocity, channel])
+            .expect("Failed to send NOTE_OFF_MSG");
     }
 
-    pub async fn setup_midi_input(
-        &mut self,
-        shared_state: Arc<RwLock<SharedState>>,
-    ) -> Result<(), Error> {
+    pub async fn setup_midi_input(&mut self, shared_state: Arc<RwLock<SharedState>>) -> Result<()> {
         info!("Setting up MIDI input...");
         let mut midi_in = MidiInput::new("MIDI Input").context("Failed to create MIDI input")?;
         midi_in.ignore(midir::Ignore::None);

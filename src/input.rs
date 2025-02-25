@@ -55,7 +55,14 @@ pub async fn run_input_handler(
             let mut w_state = state.write().await;
             for key in diff {
                 match key {
-                    Keycode::Space => w_state.playing = !w_state.playing,
+                    Keycode::Space => {
+                        w_state.playing = !w_state.playing;
+
+                        match w_state.playing {
+                            true => info!("Resumed playback!"),
+                            false => info!("Paused playback!"),
+                        }
+                    }
                     Keycode::C => {
                         w_state.change_midi_channel();
                         info!("Changing MIDI channel to {}", w_state.midi_channel + 1)
