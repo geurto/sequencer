@@ -1,4 +1,5 @@
 use core::fmt;
+use log::info;
 
 use crate::sequencers::euclidean::state::EuclideanSequencerState;
 use crate::sequencers::mixer::state::MixerState;
@@ -50,11 +51,47 @@ impl SharedState {
         self.midi_channel = (self.midi_channel + 1) % 16;
     }
 
+    pub fn increase_steps(&mut self) {
+        match self.active_sequencer {
+            ActiveSequencer::Left => self.left_state.increase_steps(),
+            ActiveSequencer::Right => self.right_state.increase_steps(),
+        }
+    }
+
+    pub fn decrease_steps(&mut self) {
+        match self.active_sequencer {
+            ActiveSequencer::Left => self.left_state.decrease_steps(),
+            ActiveSequencer::Right => self.right_state.decrease_steps(),
+        }
+    }
+
+    pub fn increase_pulses(&mut self) {
+        match self.active_sequencer {
+            ActiveSequencer::Left => self.left_state.increase_pulses(),
+            ActiveSequencer::Right => self.right_state.increase_pulses(),
+        }
+    }
+
+    pub fn decrease_pulses(&mut self) {
+        match self.active_sequencer {
+            ActiveSequencer::Left => self.left_state.decrease_pulses(),
+            ActiveSequencer::Right => self.right_state.decrease_pulses(),
+        }
+    }
+
+    pub fn change_pitch(&mut self, amount: i8) {
+        match self.active_sequencer {
+            ActiveSequencer::Left => self.left_state.change_pitch(amount),
+            ActiveSequencer::Right => self.right_state.change_pitch(amount),
+        }
+    }
+
     pub fn switch_active_sequencer(&mut self) {
         match self.active_sequencer {
             ActiveSequencer::Left => self.active_sequencer = ActiveSequencer::Right,
             ActiveSequencer::Right => self.active_sequencer = ActiveSequencer::Left,
         }
+        info!("Switched sequencer to {:?}", self.active_sequencer);
     }
 }
 

@@ -9,7 +9,7 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 
 use crate::sequencers::euclidean::state::{EuclideanSequencerInput, EuclideanSequencerState};
 use crate::sequencers::mixer::state::{MixerInput, MixerState};
-use crate::state::{ActiveSequencer, SharedState};
+use crate::state::SharedState;
 
 pub enum Input {
     Bpm(f32),
@@ -53,10 +53,6 @@ pub async fn run_input_handler(
 
         if !diff.is_empty() {
             let mut w_state = state.write().await;
-            let mut sequencer_config = match w_state.active_sequencer {
-                ActiveSequencer::Left => w_state.left_state.clone(),
-                ActiveSequencer::Right => w_state.right_state.clone(),
-            };
             for key in diff {
                 match key {
                     Keycode::Space => w_state.playing = !w_state.playing,
@@ -66,14 +62,15 @@ pub async fn run_input_handler(
                     }
                     Keycode::R => w_state.mixer_state.increase_ratio(),
                     Keycode::F => w_state.mixer_state.decrease_ratio(),
-                    Keycode::Up => sequencer_config.increase_steps(),
-                    Keycode::Down => sequencer_config.decrease_steps(),
-                    Keycode::Right => sequencer_config.increase_pulses(),
-                    Keycode::Left => sequencer_config.decrease_pulses(),
-                    Keycode::W => sequencer_config.change_pitch(1),
-                    Keycode::S => sequencer_config.change_pitch(-1),
-                    Keycode::D => sequencer_config.change_pitch(12),
-                    Keycode::A => sequencer_config.change_pitch(-12),
+                    Keycode::Up => w_state.increase_steps(),
+                    Keycode::Down => w_state.decrease_steps(),
+                    Keycode::Right => w_state.increase_pulses(),
+                    Keycode::Left => w_state.decrease_pulses(),
+                    Keycode::W => w_state.change_pitch(1),
+                    Keycode::S => w_state.change_pitch(-1),
+                    Keycode::D => w_state.change_pitch(12),
+                    Keycode::A => w_state.change_pitch(-12),
+                    Keycode::Tab => w_state.switch_active_sequencer(),
                     _ => {}
                 };
             }
