@@ -1,57 +1,64 @@
 use anyhow::Result;
+use device_query::Keycode;
 use env_logger::Builder;
-use sequencer::InputHandler;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tokio::signal;
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 
 use sequencer::{
-    input::InputHandler, playback::play, sequencers::euclidean::gui::Gui as EuclideanGui,
-    EuclideanSequencer, Gui, MidiHandler, Mixer, Sequencer, SharedState,
+    playback::play, run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui,
+    start_polling, EuclideanSequencer, EuclideanSequencerState, Gui, MidiHandler, Mixer,
+    MixerState, Sequence, Sequencer, SharedState,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
     Builder::new().filter(None, log::LevelFilter::Info).init();
 
+    // key input handling
+    let (tx_keys, rx_keys) = mpsc::channel::<HashSet<Keycode>>(100);
+
     // sequencer / mixer state - EuclideanSequencerState / MixerState
-    let (tx_sequencer_left, rx_sequencer_left) = broadcast::channel(2);
+    let (tx_sequencer_left, rx_sequencer_left) = broadcast::channel::<EuclideanSequencerState>(2);
     let rx_sequencer_left_gui = tx_sequencer_left.subscribe();
 
-    let (tx_sequencer_right, rx_sequencer_right) = broadcast::channel(2);
+    let (tx_sequencer_right, rx_sequencer_right) = broadcast::channel::<EuclideanSequencerState>(2);
     let rx_sequencer_right_gui = tx_sequencer_right.subscribe();
 
-    let (tx_mixer, rx_mixer) = broadcast::channel(2);
+    let (tx_mixer, rx_mixer) = broadcast::channel::<MixerState>(2);
 
     // separate sequences from left/right - (Option<Sequence>, Option<Sequence>)
-    let (tx_sequence, rx_sequence) = mpsc::channel(1);
+    let (tx_sequence, rx_sequence) = mpsc::channel::<(Option<Sequence>, Option<Sequence>)>(1);
 
     // final sequence for playback - Sequence
-    let (tx_mixed_sequence, rx_mixed_sequence) = mpsc::channel(1);
+    let (tx_mixed_sequence, rx_mixed_sequence) = mpsc::channel::<Sequence>(1);
 
-    let shared_state: RwLock<SharedState> = RwLock::new(SharedState::new(120));
+    let shared_state: Arc<RwLock<SharedState>> = Arc::new(RwLock::new(SharedState::new(120.)));
 
     // MIDI input and output
     let midi_handler = Arc::new(Mutex::new(MidiHandler::new()?));
     midi_handler
         .lock()
         .await
-        .setup_midi_input(shared_state)
+        .setup_midi_input(shared_state.clone())
         .await?;
 
     let mut handles = vec![];
 
     // Sequencers and mixer
     let mut sequencer_a =
-        EuclideanSequencer::new(rx_sequencer_left, tx_sequence.clone(), shared_state);
+        EuclideanSequencer::new(rx_sequencer_left, tx_sequence.clone(), shared_state.clone());
     sequencer_a.generate_sequence().await;
     handles.push(tokio::spawn(async move {
         sequencer_a.run(0).await.unwrap();
     }));
 
     // both Euclidean for now to keep it simple
-    let mut sequencer_b =
-        EuclideanSequencer::new(rx_sequencer_right, tx_sequence.clone(), shared_state);
+    let mut sequencer_b = EuclideanSequencer::new(
+        rx_sequencer_right,
+        tx_sequence.clone(),
+        shared_state.clone(),
+    );
     sequencer_b.generate_sequence().await;
     handles.push(tokio::spawn(async move {
         sequencer_b.run(1).await.unwrap();
@@ -64,21 +71,23 @@ async fn main() -> Result<()> {
     }));
 
     // Input handling
-    let input_handler = InputHandler::new(
-        shared_state,
-        tx_sequencer_left,
-        tx_sequencer_right,
-        tx_mixer,
-    );
+    start_polling(tx_keys);
+    let shared_state_input = shared_state.clone();
     handles.push(tokio::spawn(async move {
-        input_handler.run().await;
+        let _ = run_input_handler(
+            rx_keys,
+            shared_state_input,
+            tx_sequencer_left,
+            tx_sequencer_right,
+            tx_mixer,
+        )
+        .await;
     }));
 
     // Playback
-    let shared_state_playback = shared_state;
     let midi_handler_clone = midi_handler.clone();
     handles.push(tokio::spawn(async move {
-        play(midi_handler_clone, rx_mixed_sequence, shared_state_playback)
+        play(midi_handler_clone, rx_mixed_sequence, shared_state.clone())
             .await
             .unwrap();
     }));
@@ -96,6 +105,6 @@ async fn main() -> Result<()> {
     let gui_sequencer_left = EuclideanGui::new(1, rx_sequencer_left_gui);
     let gui_sequencer_right = EuclideanGui::new(2, rx_sequencer_right_gui);
 
-    Gui::run(rx_gui)?;
+    Gui::run(gui_sequencer_left, gui_sequencer_right)?;
     Ok(())
 }

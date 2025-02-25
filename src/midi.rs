@@ -5,7 +5,7 @@ use log::{info, warn};
 use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
 
 pub struct MidiHandler {
@@ -59,7 +59,7 @@ impl MidiHandler {
 
     pub async fn setup_midi_input(
         &mut self,
-        shared_state: Arc<Mutex<SharedState>>,
+        shared_state: Arc<RwLock<SharedState>>,
     ) -> Result<(), Error> {
         info!("Setting up MIDI input...");
         let mut midi_in = MidiInput::new("MIDI Input").context("Failed to create MIDI input")?;
@@ -119,10 +119,10 @@ impl MidiHandler {
     }
 }
 
-async fn handle_midi_message(message: Vec<u8>, shared_state: &Arc<Mutex<SharedState>>) {
+async fn handle_midi_message(message: Vec<u8>, shared_state: &Arc<RwLock<SharedState>>) {
     if message[0] == 0xF8 {
-        // MIDI Clock message
-        let mut state = shared_state.lock().await;
+        // MIDI Clock message -- @todo this may need to stay an Arc<Mutex<>>
+        let mut state = shared_state.write().await;
         state.clock_ticks += 1;
         if state.clock_ticks >= 24 {
             state.clock_ticks = 0;
@@ -130,4 +130,3 @@ async fn handle_midi_message(message: Vec<u8>, shared_state: &Arc<Mutex<SharedSt
         }
     }
 }
-

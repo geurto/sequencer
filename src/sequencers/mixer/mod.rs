@@ -1,23 +1,23 @@
 pub mod state;
 
 use crate::note::Sequence;
-use log::debug;
+use log::{debug, error};
 use state::MixerState;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::{broadcast, mpsc};
 
 pub struct Mixer {
     state: MixerState,
     sequences: (Sequence, Sequence),
-    rx_sequence: Receiver<(Option<Sequence>, Option<Sequence>)>,
-    tx_mixed_sequence: Sender<Sequence>,
-    rx_update: Receiver<MixerState>,
+    rx_sequence: mpsc::Receiver<(Option<Sequence>, Option<Sequence>)>,
+    tx_mixed_sequence: mpsc::Sender<Sequence>,
+    rx_update: broadcast::Receiver<MixerState>,
 }
 
 impl Mixer {
     pub fn new(
-        rx_sequence: Receiver<(Option<Sequence>, Option<Sequence>)>,
-        tx_mixed_sequence: Sender<Sequence>,
-        rx_update: Receiver<MixerState>,
+        rx_sequence: mpsc::Receiver<(Option<Sequence>, Option<Sequence>)>,
+        tx_mixed_sequence: mpsc::Sender<Sequence>,
+        rx_update: broadcast::Receiver<MixerState>,
     ) -> Self {
         Mixer {
             state: MixerState::default(),
@@ -30,7 +30,7 @@ impl Mixer {
 
     pub async fn run(&mut self) {
         loop {
-            if let Some(state) = self.rx_update.recv().await {
+            if let Ok(state) = self.rx_update.recv().await {
                 debug!("Mixer received update request");
                 self.state = state;
                 self.mix().await;
@@ -63,6 +63,9 @@ impl Mixer {
                 mixed_sequence.notes.push(note);
             }
         }
-        self.tx_mixed_sequence.send(mixed_sequence);
+
+        if let Err(e) = self.tx_mixed_sequence.send(mixed_sequence).await {
+            error!("Error sending mixed sequence: {}", e);
+        }
     }
 }

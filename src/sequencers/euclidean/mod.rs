@@ -9,19 +9,19 @@ use crate::state::SharedState;
 use anyhow::Result;
 use log::debug;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tokio::sync::RwLock;
+use tokio::sync::{broadcast, mpsc};
 
 pub struct EuclideanSequencer {
     config: EuclideanSequencerState,
-    rx_config: mpsc::Receiver<EuclideanSequencerState>,
+    rx_config: broadcast::Receiver<EuclideanSequencerState>,
     tx_sequence: mpsc::Sender<(Option<Sequence>, Option<Sequence>)>,
     shared_state: Arc<RwLock<SharedState>>,
 }
 
 impl EuclideanSequencer {
     pub fn new(
-        rx_config: mpsc::Receiver<EuclideanSequencerState>,
+        rx_config: broadcast::Receiver<EuclideanSequencerState>,
         tx_sequence: mpsc::Sender<(Option<Sequence>, Option<Sequence>)>,
         shared_state: Arc<RwLock<SharedState>>,
     ) -> Self {
@@ -79,7 +79,7 @@ impl Sequencer for EuclideanSequencer {
 
     async fn run(&mut self, sequencer_slot: usize) -> Result<()> {
         loop {
-            if let Some(config) = self.rx_config.recv().await {
+            if let Ok(config) = self.rx_config.recv().await {
                 debug!("Euclidean sequencer received config: {:?}", config);
                 self.config = config.clone();
                 let sequence = self.generate_sequence().await;

@@ -11,7 +11,7 @@ use crate::state::*;
 pub async fn play(
     midi_handler: Arc<Mutex<MidiHandler>>,
     mut rx_sequence: mpsc::Receiver<Sequence>,
-    shared_state: RwLock<SharedState>,
+    shared_state: Arc<RwLock<SharedState>>,
 ) -> Result<(), Error> {
     info!("Starting playback loop");
     let mut current_note_index = 0;
