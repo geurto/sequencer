@@ -33,7 +33,8 @@ impl PlaybackHandler {
         let mut sequence = Sequence::default();
 
         loop {
-            if let Some(seq) = self.rx_sequence.recv().await {
+            if let Ok(seq) = self.rx_sequence.try_recv() {
+                info!("Received new sequence: {:?}", seq);
                 sequence = seq;
             }
 
