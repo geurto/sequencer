@@ -10,7 +10,8 @@ anyhow = "1.0.86"
 ctrlc = "3.1.0"
 device_query = "2.1.0"
 env_logger = "0.11.3"
-iced = { version = "0.13.1", features = ["advanced", "canvas"] }
+iced = { version = "0.13.1", features = ["advanced", "canvas", "tokio"] }
+iced_futures = "0.13.2"
 log = "0.4.22"
 markov = "1.1.0"
 midir = "0.10.0"

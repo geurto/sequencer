@@ -3,6 +3,7 @@ use iced::{
     widget::{container, row, Container},
     Element, Length, Subscription, Task, Theme,
 };
+use log::info;
 
 #[derive(Debug)]
 pub enum Message {
@@ -22,6 +23,7 @@ impl Gui {
         }
     }
     pub fn subscription(&self) -> Subscription<Message> {
+        info!("Main GUI subscription");
         let left_sub = self
             .sequencer_left
             .subscription()
@@ -36,8 +38,12 @@ impl Gui {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        info!("Main GUI update");
         match message {
-            Message::Tick => {}
+            Message::Tick => {
+                //self.sequencer_left.update(EuclideanGuiMessage::Tick);
+                //self.sequencer_right.update(EuclideanGuiMessage::Tick);
+            }
         }
 
         Task::none()
@@ -46,7 +52,10 @@ impl Gui {
     pub fn view(&self) -> Element<Message> {
         let sequencer_left_view = Container::new(self.sequencer_left.view().map(
             |child_msg: EuclideanGuiMessage| match child_msg {
-                EuclideanGuiMessage::StateChange(_) => Message::Tick,
+                EuclideanGuiMessage::FromApp(_) => {
+                    info!("Left sequencer StateChange view message");
+                    Message::Tick
+                }
             },
         ))
         .width(Length::FillPortion(1))
@@ -54,7 +63,10 @@ impl Gui {
 
         let sequencer_right_view = Container::new(self.sequencer_right.view().map(
             |child_msg: EuclideanGuiMessage| match child_msg {
-                EuclideanGuiMessage::StateChange(_) => Message::Tick,
+                EuclideanGuiMessage::FromApp(_) => {
+                    info!("Right sequencer StateChange view message");
+                    Message::Tick
+                }
             },
         ))
         .width(Length::FillPortion(1))

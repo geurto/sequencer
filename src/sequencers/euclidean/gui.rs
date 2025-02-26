@@ -1,13 +1,15 @@
 use iced::{
-    advanced::subscription,
-    widget::canvas::{self, Canvas, Frame, Path},
-    widget::{column, container, text},
+    futures::{channel::mpsc, SinkExt, Stream},
+    stream,
+    widget::{
+        canvas::{self, Canvas, Frame, Path},
+        column, container, text,
+    },
     Alignment::Center,
     Color, Element, Length, Point, Renderer, Subscription,
 };
 
-use rustc_hash::FxHasher;
-use tokio::sync::broadcast;
+use log::info;
 
 use super::state::EuclideanSequencerState;
 
@@ -18,34 +20,34 @@ const CIRCLE_SPACING: f32 = 60.0;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    StateChange(EuclideanSequencerState),
+    FromApp(Event),
 }
 
 pub struct Gui {
     state: EuclideanSequencerState,
-    rx_state: broadcast::Receiver<EuclideanSequencerState>,
     index: usize,
 }
 
 impl Gui {
-    pub fn new(index: usize, rx_state: broadcast::Receiver<EuclideanSequencerState>) -> Self {
+    pub fn new(index: usize) -> Self {
         Self {
             state: EuclideanSequencerState::new(),
-            rx_state,
             index,
         }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        iced::advanced::subscription::from_recipe(StateSubscription::new(
-            self.rx_state.resubscribe(),
-        ))
+        info!("Creating subscription for EuclideanGui #{}", self.index);
+        Subscription::run(poll).map(Message::FromApp)
     }
 
     pub fn update(&mut self, message: Message) {
         match message {
-            Message::StateChange(new_state) => {
-                self.state = new_state;
+            Message::FromApp(event) => {
+                info!(
+                    "EuclideanGui #{}: got FromApp message with event {:?}",
+                    self.index, event
+                );
             }
         }
     }
@@ -102,36 +104,32 @@ impl canvas::Program<Message> for Gui {
     }
 }
 
-pub struct StateSubscription {
-    rx: broadcast::Receiver<EuclideanSequencerState>,
+#[derive(Debug, Clone)]
+pub enum Event {
+    Connected(mpsc::Sender<Message>),
+    Disconnected,
+    StateChange(EuclideanSequencerState),
 }
 
-impl StateSubscription {
-    pub fn new(rx: broadcast::Receiver<EuclideanSequencerState>) -> Self {
-        Self { rx }
-    }
-}
+pub fn poll() -> impl Stream<Item = Event> {
+    stream::channel(100, |mut output| async move {
+        let (sender, mut receiver) = mpsc::channel(100);
 
-impl subscription::Recipe for StateSubscription {
-    type Output = Message;
+        output
+            .send(Event::Connected(sender))
+            .await
+            .expect("Failed to send Connected event");
 
-    fn hash(&self, state: &mut FxHasher) {
-        use std::hash::Hash;
-        std::any::TypeId::of::<Self>().hash(state);
-    }
+        loop {
+            use iced_futures::futures::StreamExt;
 
-    fn stream(
-        self: Box<Self>,
-        _input: subscription::EventStream,
-    ) -> iced::advanced::graphics::futures::BoxStream<Self::Output> {
-        use iced::futures::{stream, StreamExt};
+            let msg = receiver.select_next_some().await;
 
-        let rx = self.rx;
-
-        stream::unfold(rx, move |mut rx| async move {
-            let next_state = rx.recv().await.ok();
-            next_state.map(|state| (Message::StateChange(state), rx))
-        })
-        .boxed()
-    }
+            match msg {
+                Message::FromApp(event) => {
+                    output.send(event).await.expect("Failed to send event");
+                }
+            }
+        }
+    })
 }

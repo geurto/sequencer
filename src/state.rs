@@ -4,14 +4,14 @@ use log::info;
 use crate::sequencers::euclidean::state::EuclideanSequencerState;
 use crate::sequencers::mixer::state::MixerState;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub enum ActiveSequencer {
     #[default]
     Left,
     Right,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct SharedState {
     pub playing: bool,
     pub bpm: f32,

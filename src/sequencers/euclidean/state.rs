@@ -53,7 +53,7 @@ impl EuclideanSequencerState {
     }
 
     pub fn decrease_pulses(&mut self) {
-        if self.pulses > 1 {
+        if self.pulses > 0 {
             self.pulses -= 1;
         }
         info!("Pulses: {}", self.pulses);

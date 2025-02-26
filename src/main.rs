@@ -19,13 +19,14 @@ async fn main() -> Result<()> {
     let (tx_keys, rx_keys) = mpsc::channel::<HashSet<Keycode>>(100);
 
     // sequencer / mixer state - EuclideanSequencerState / MixerState
-    let (tx_sequencer_left, rx_sequencer_left) = broadcast::channel::<EuclideanSequencerState>(2);
+    let (tx_sequencer_left, rx_sequencer_left) = broadcast::channel::<EuclideanSequencerState>(16);
     let rx_sequencer_left_gui = tx_sequencer_left.subscribe();
 
-    let (tx_sequencer_right, rx_sequencer_right) = broadcast::channel::<EuclideanSequencerState>(2);
+    let (tx_sequencer_right, rx_sequencer_right) =
+        broadcast::channel::<EuclideanSequencerState>(16);
     let rx_sequencer_right_gui = tx_sequencer_right.subscribe();
 
-    let (tx_mixer, rx_mixer) = broadcast::channel::<MixerState>(2);
+    let (tx_mixer, rx_mixer) = broadcast::channel::<MixerState>(16);
 
     // separate sequences from left/right - (Option<Sequence>, Option<Sequence>)
     let (tx_sequence, rx_sequence) = mpsc::channel::<(Option<Sequence>, Option<Sequence>)>(1);

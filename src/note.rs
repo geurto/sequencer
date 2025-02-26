@@ -87,7 +87,7 @@ impl Debug for Sequence {
 
 impl Default for Sequence {
     fn default() -> Self {
-        let notes = vec![Note::new(0, 0, NoteDuration::Whole, 120.0)];
+        let notes = vec![Note::new(0, 0, NoteDuration::Sixteenth, 120.0)];
         Sequence { notes }
     }
 }
