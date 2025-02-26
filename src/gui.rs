@@ -1,76 +1,76 @@
-use crate::sequencers::euclidean::gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage};
+use crate::{
+    sequencers::euclidean::gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage},
+    SharedState,
+};
 use iced::{
+    futures::{channel::mpsc, SinkExt, Stream},
+    stream,
     widget::{container, row, Container},
     Element, Length, Subscription, Task, Theme,
 };
 use log::info;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[derive(Debug)]
 pub enum Message {
-    Tick,
+    ReceivedEvent(Event),
 }
 
 pub struct Gui {
+    shared_state: Arc<RwLock<SharedState>>,
+    cached_state: Option<SharedState>,
     sequencer_left: EuclideanGui,
     sequencer_right: EuclideanGui,
 }
 
 impl Gui {
-    fn new(sequencer_left: EuclideanGui, sequencer_right: EuclideanGui) -> Self {
+    fn new(
+        shared_state: Arc<RwLock<SharedState>>,
+        sequencer_left: EuclideanGui,
+        sequencer_right: EuclideanGui,
+    ) -> Self {
         Self {
+            shared_state,
+            cached_state: None,
             sequencer_left,
             sequencer_right,
         }
     }
     pub fn subscription(&self) -> Subscription<Message> {
         info!("Main GUI subscription");
-        let left_sub = self
-            .sequencer_left
-            .subscription()
-            .map(|_child_msg: EuclideanGuiMessage| Message::Tick);
-
-        let right_sub = self
-            .sequencer_right
-            .subscription()
-            .map(|_child_msg: EuclideanGuiMessage| Message::Tick);
-
-        Subscription::batch(vec![left_sub, right_sub])
+        Subscription::run(poll).map(Message::ReceivedEvent)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         info!("Main GUI update");
         match message {
-            Message::Tick => {
-                //self.sequencer_left.update(EuclideanGuiMessage::Tick);
-                //self.sequencer_right.update(EuclideanGuiMessage::Tick);
-            }
+            Message::ReceivedEvent(event) => match event {
+                Event::Connected(_) => info!("Sender connected!"),
+                Event::Disconnected => info!("Sender Disconnected"),
+                Event::StateChanged(state) => {
+                    info!("Received state");
+                    self.cached_state = Some(state.clone());
+
+                    self.sequencer_left
+                        .update(EuclideanGuiMessage::FromApp(state.left_state));
+                    self.sequencer_right
+                        .update(EuclideanGuiMessage::FromApp(state.right_state));
+                }
+            },
         }
 
         Task::none()
     }
 
     pub fn view(&self) -> Element<Message> {
-        let sequencer_left_view = Container::new(self.sequencer_left.view().map(
-            |child_msg: EuclideanGuiMessage| match child_msg {
-                EuclideanGuiMessage::FromApp(_) => {
-                    info!("Left sequencer StateChange view message");
-                    Message::Tick
-                }
-            },
-        ))
-        .width(Length::FillPortion(1))
-        .height(Length::Fill);
+        let sequencer_left_view = Container::new(self.sequencer_left.view())
+            .width(Length::FillPortion(1))
+            .height(Length::Fill);
 
-        let sequencer_right_view = Container::new(self.sequencer_right.view().map(
-            |child_msg: EuclideanGuiMessage| match child_msg {
-                EuclideanGuiMessage::FromApp(_) => {
-                    info!("Right sequencer StateChange view message");
-                    Message::Tick
-                }
-            },
-        ))
-        .width(Length::FillPortion(1))
-        .height(Length::Fill);
+        let sequencer_right_view = Container::new(self.sequencer_right.view())
+            .width(Length::FillPortion(1))
+            .height(Length::Fill);
 
         let content = row![sequencer_left_view, sequencer_right_view].spacing(20);
         container(content)
@@ -79,17 +79,43 @@ impl Gui {
             .into()
     }
 
-    pub fn run(gui_left: EuclideanGui, gui_right: EuclideanGui) -> iced::Result {
+    pub fn run(
+        shared_state: Arc<RwLock<SharedState>>,
+        sequencer_left: EuclideanGui,
+        sequencer_right: EuclideanGui,
+    ) -> iced::Result {
         iced::application("Sequencer", Gui::update, Gui::view)
             .subscription(|gui| gui.subscription())
             .theme(|_| Theme::Dark)
             .antialiasing(true)
             .centered()
             .run_with(|| {
-                let left = gui_left;
-                let right = gui_right;
-
-                (Self::new(left, right), Task::none())
+                (
+                    Self::new(shared_state, sequencer_left, sequencer_right),
+                    Task::none(),
+                )
             })
     }
+}
+
+#[derive(Debug, Clone)]
+enum Event {
+    Connected(mpsc::Sender<Message>),
+    Disconnected,
+    StateChanged(SharedState),
+}
+
+fn poll() -> impl Stream<Item = Event> {
+    stream::channel(100, |mut output| async move {
+        let (sender, mut receiver) = mpsc::channel(100);
+
+        output.send(Event::Connected(sender)).await;
+
+        loop {
+            use iced_futures::futures::StreamExt;
+
+            let input = receiver.select_next_some().await;
+            info!("poll received input {:?}", input);
+        }
+    })
 }

@@ -6,9 +6,9 @@ use tokio::signal;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
 use sequencer::{
-    run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui, start_polling,
-    EuclideanSequencer, EuclideanSequencerState, Gui, MidiHandler, Mixer, MixerState,
-    PlaybackHandler, Sequence, Sequencer, SharedState,
+    gui::AppFlags, run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui,
+    start_polling, EuclideanSequencer, EuclideanSequencerState, Gui, MidiHandler, Mixer,
+    MixerState, PlaybackHandler, Sequence, Sequencer, SharedState,
 };
 
 #[tokio::main]
@@ -20,11 +20,9 @@ async fn main() -> Result<()> {
 
     // sequencer / mixer state - EuclideanSequencerState / MixerState
     let (tx_sequencer_left, rx_sequencer_left) = broadcast::channel::<EuclideanSequencerState>(16);
-    let rx_sequencer_left_gui = tx_sequencer_left.subscribe();
 
     let (tx_sequencer_right, rx_sequencer_right) =
         broadcast::channel::<EuclideanSequencerState>(16);
-    let rx_sequencer_right_gui = tx_sequencer_right.subscribe();
 
     let (tx_mixer, rx_mixer) = broadcast::channel::<MixerState>(16);
 
@@ -88,9 +86,15 @@ async fn main() -> Result<()> {
     });
 
     // GUI
-    let gui_sequencer_left = EuclideanGui::new(1, rx_sequencer_left_gui);
-    let gui_sequencer_right = EuclideanGui::new(2, rx_sequencer_right_gui);
+    let gui_sequencer_left = EuclideanGui::new(1);
+    let gui_sequencer_right = EuclideanGui::new(2);
 
-    Gui::run(gui_sequencer_left, gui_sequencer_right)?;
+    let flags = AppFlags {
+        rx_state: rx_gui,
+        sequencer_left: gui_sequencer_left,
+        sequencer_right: gui_sequencer_right,
+    };
+
+    Gui::run(flags)?;
     Ok(())
 }
