@@ -7,7 +7,7 @@ use crate::sequencers::euclidean::state::EuclideanSequencerState;
 
 use crate::state::{SequencerSlot, SharedState};
 use anyhow::Result;
-use log::info;
+use log::debug;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
@@ -61,7 +61,7 @@ impl Sequencer for EuclideanSequencer {
             };
             sequence.notes.push(note);
         }
-        info!("Generated sequence {:?}", sequence);
+        debug!("Generated sequence {:?}", sequence);
         sequence
     }
 
@@ -75,8 +75,8 @@ impl Sequencer for EuclideanSequencer {
             };
 
             if state != previous_state {
-                info!(
-                    "Euclidean sequencer {:?} new config: {:?}",
+                debug!(
+                    "Euclidean sequencer {:?} new state: {:?}",
                     self.sequencer_slot, state
                 );
                 self.cached_state = state.clone();
@@ -84,7 +84,7 @@ impl Sequencer for EuclideanSequencer {
                 {
                     match self.sequencer_slot {
                         SequencerSlot::Left => {
-                            info!(
+                            debug!(
                                 "Sending sequence {:?} to slot {:?}",
                                 sequence, self.sequencer_slot
                             );

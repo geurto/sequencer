@@ -1,14 +1,17 @@
 use anyhow::Result;
 use device_query::Keycode;
 use env_logger::Builder;
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex as SyncMutex},
+};
 use tokio::signal;
 use tokio::sync::{mpsc, RwLock};
 
 use sequencer::{
-    run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui, start_polling,
-    state::SequencerSlot, EuclideanSequencer, Gui, MidiHandler, Mixer, PlaybackHandler, Sequence,
-    Sequencer, SharedState,
+    gui::Message, run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui,
+    start_polling, state::SequencerSlot, EuclideanSequencer, Gui, MidiHandler, Mixer,
+    PlaybackHandler, Sequence, Sequencer, SharedState,
 };
 
 #[tokio::main]
@@ -25,6 +28,9 @@ async fn main() -> Result<()> {
     let (tx_mixed_sequence, rx_mixed_sequence) = mpsc::channel::<Sequence>(1);
 
     let shared_state: Arc<RwLock<SharedState>> = Arc::new(RwLock::new(SharedState::new(120.)));
+
+    let tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>> =
+        Arc::new(SyncMutex::new(None));
 
     // Sequencers and mixer
     let mut sequencer_a = EuclideanSequencer::new(
@@ -53,13 +59,25 @@ async fn main() -> Result<()> {
     // Input handling
     start_polling(tx_keys);
     let shared_state_input = shared_state.clone();
-    tokio::spawn(async move { run_input_handler(rx_keys, shared_state_input).await });
+    let tx_gui_input = tx_gui.clone();
+    tokio::spawn(async move { run_input_handler(rx_keys, tx_gui_input, shared_state_input).await });
 
     // Playback
     let midi_handler = MidiHandler::new()?;
     let mut playback_handler =
         PlaybackHandler::new(midi_handler, rx_mixed_sequence, shared_state.clone());
     tokio::spawn(async move { playback_handler.run().await });
+
+    // GUI
+    let gui_sequencer_left = EuclideanGui::new(1);
+    let gui_sequencer_right = EuclideanGui::new(2);
+
+    Gui::run(
+        tx_gui.clone(),
+        shared_state.clone(),
+        gui_sequencer_left,
+        gui_sequencer_right,
+    )?;
 
     // Shutdown
     let _ctrl_c_handle = tokio::spawn(async move {
@@ -70,14 +88,5 @@ async fn main() -> Result<()> {
         std::process::exit(0);
     });
 
-    // GUI
-    let gui_sequencer_left = EuclideanGui::new(1);
-    let gui_sequencer_right = EuclideanGui::new(2);
-
-    Gui::run(
-        shared_state.clone(),
-        gui_sequencer_left,
-        gui_sequencer_right,
-    )?;
     Ok(())
 }

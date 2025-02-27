@@ -1,12 +1,13 @@
 use anyhow::Result;
 use device_query::{DeviceQuery, DeviceState, Keycode};
-use log::info;
+use log::{error, info};
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as SyncMutex};
 use std::thread;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 
+use crate::gui::{Event, Message};
 use crate::sequencers::euclidean::state::EuclideanSequencerInput;
 use crate::sequencers::mixer::state::MixerInput;
 use crate::state::SharedState;
@@ -41,6 +42,7 @@ pub fn start_polling(tx: mpsc::Sender<HashSet<Keycode>>) {
 
 pub async fn run_input_handler(
     mut rx: mpsc::Receiver<HashSet<Keycode>>,
+    tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,
     state: Arc<RwLock<SharedState>>,
 ) -> Result<()> {
     let mut last_keys = HashSet::new();
@@ -77,6 +79,16 @@ pub async fn run_input_handler(
                     Keycode::Tab => w_state.switch_active_sequencer(),
                     _ => {}
                 };
+            }
+
+            drop(w_state);
+            let r_state = state.read().await;
+            if let Some(mut tx) = tx_gui.lock().unwrap().clone() {
+                if let Err(e) =
+                    tx.try_send(Message::ReceivedEvent(Event::StateChanged(r_state.clone())))
+                {
+                    error!("Error sending Message::ReceivedEvent to GUI: {:?}", e);
+                }
             }
         }
 
