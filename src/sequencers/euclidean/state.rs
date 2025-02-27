@@ -81,3 +81,12 @@ impl Default for EuclideanSequencerState {
         Self::new()
     }
 }
+
+impl PartialEq for EuclideanSequencerState {
+    fn eq(&self, other: &Self) -> bool {
+        self.steps == other.steps
+            && self.pulses == other.pulses
+            && self.phase == other.phase
+            && self.pitch == other.pitch
+    }
+}

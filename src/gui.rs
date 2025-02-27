@@ -15,6 +15,8 @@ use tokio::sync::RwLock;
 #[derive(Debug)]
 pub enum Message {
     ReceivedEvent(Event),
+    LeftSequencer(EuclideanGuiMessage),
+    RightSequencer(EuclideanGuiMessage),
 }
 
 pub struct Gui {
@@ -58,19 +60,27 @@ impl Gui {
                         .update(EuclideanGuiMessage::FromApp(state.right_state));
                 }
             },
+            Message::LeftSequencer(state) => {
+                info!("Left sequencer message in Main GUI update: {:?}", state)
+            }
+            Message::RightSequencer(state) => {
+                info!("Right sequencer message in Main GUI update: {:?}", state)
+            }
         }
 
         Task::none()
     }
 
     pub fn view(&self) -> Element<Message> {
-        let sequencer_left_view = Container::new(self.sequencer_left.view())
-            .width(Length::FillPortion(1))
-            .height(Length::Fill);
+        let sequencer_left_view =
+            Container::new(self.sequencer_left.view().map(Message::LeftSequencer))
+                .width(Length::FillPortion(1))
+                .height(Length::Fill);
 
-        let sequencer_right_view = Container::new(self.sequencer_right.view())
-            .width(Length::FillPortion(1))
-            .height(Length::Fill);
+        let sequencer_right_view =
+            Container::new(self.sequencer_right.view().map(Message::RightSequencer))
+                .width(Length::FillPortion(1))
+                .height(Length::Fill);
 
         let content = row![sequencer_left_view, sequencer_right_view].spacing(20);
         container(content)

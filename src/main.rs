@@ -3,12 +3,12 @@ use device_query::Keycode;
 use env_logger::Builder;
 use std::{collections::HashSet, sync::Arc};
 use tokio::signal;
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{mpsc, RwLock};
 
 use sequencer::{
-    gui::AppFlags, run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui,
-    start_polling, EuclideanSequencer, EuclideanSequencerState, Gui, MidiHandler, Mixer,
-    MixerState, PlaybackHandler, Sequence, Sequencer, SharedState,
+    run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui, start_polling,
+    state::SequencerSlot, EuclideanSequencer, Gui, MidiHandler, Mixer, PlaybackHandler, Sequence,
+    Sequencer, SharedState,
 };
 
 #[tokio::main]
@@ -17,14 +17,6 @@ async fn main() -> Result<()> {
 
     // key input handling
     let (tx_keys, rx_keys) = mpsc::channel::<HashSet<Keycode>>(100);
-
-    // sequencer / mixer state - EuclideanSequencerState / MixerState
-    let (tx_sequencer_left, rx_sequencer_left) = broadcast::channel::<EuclideanSequencerState>(16);
-
-    let (tx_sequencer_right, rx_sequencer_right) =
-        broadcast::channel::<EuclideanSequencerState>(16);
-
-    let (tx_mixer, rx_mixer) = broadcast::channel::<MixerState>(16);
 
     // separate sequences from left/right - (Option<Sequence>, Option<Sequence>)
     let (tx_sequence, rx_sequence) = mpsc::channel::<(Option<Sequence>, Option<Sequence>)>(1);
@@ -35,42 +27,35 @@ async fn main() -> Result<()> {
     let shared_state: Arc<RwLock<SharedState>> = Arc::new(RwLock::new(SharedState::new(120.)));
 
     // Sequencers and mixer
-    let mut sequencer_a =
-        EuclideanSequencer::new(rx_sequencer_left, tx_sequence.clone(), shared_state.clone());
+    let mut sequencer_a = EuclideanSequencer::new(
+        SequencerSlot::Left,
+        tx_sequence.clone(),
+        shared_state.clone(),
+    );
     sequencer_a.generate_sequence().await;
     tokio::spawn(async move {
-        sequencer_a.run(0).await.unwrap();
+        sequencer_a.run().await.unwrap();
     });
 
     // both Euclidean for now to keep it simple
     let mut sequencer_b = EuclideanSequencer::new(
-        rx_sequencer_right,
+        SequencerSlot::Right,
         tx_sequence.clone(),
         shared_state.clone(),
     );
     sequencer_b.generate_sequence().await;
-    tokio::spawn(async move { sequencer_b.run(1).await });
+    tokio::spawn(async move { sequencer_b.run().await });
 
-    let mut sequence_mixer = Mixer::new(rx_sequence, tx_mixed_sequence, rx_mixer);
+    let mut sequence_mixer = Mixer::new(shared_state.clone(), tx_mixed_sequence, rx_sequence);
     sequence_mixer.mix().await;
     tokio::spawn(async move { sequence_mixer.run().await });
 
     // Input handling
     start_polling(tx_keys);
     let shared_state_input = shared_state.clone();
-    tokio::spawn(async move {
-        run_input_handler(
-            rx_keys,
-            shared_state_input,
-            tx_sequencer_left,
-            tx_sequencer_right,
-            tx_mixer,
-        )
-        .await
-    });
+    tokio::spawn(async move { run_input_handler(rx_keys, shared_state_input).await });
 
     // Playback
-
     let midi_handler = MidiHandler::new()?;
     let mut playback_handler =
         PlaybackHandler::new(midi_handler, rx_mixed_sequence, shared_state.clone());
@@ -89,12 +74,10 @@ async fn main() -> Result<()> {
     let gui_sequencer_left = EuclideanGui::new(1);
     let gui_sequencer_right = EuclideanGui::new(2);
 
-    let flags = AppFlags {
-        rx_state: rx_gui,
-        sequencer_left: gui_sequencer_left,
-        sequencer_right: gui_sequencer_right,
-    };
-
-    Gui::run(flags)?;
+    Gui::run(
+        shared_state.clone(),
+        gui_sequencer_left,
+        gui_sequencer_right,
+    )?;
     Ok(())
 }

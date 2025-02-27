@@ -5,7 +5,7 @@ use crate::sequencers::euclidean::state::EuclideanSequencerState;
 use crate::sequencers::mixer::state::MixerState;
 
 #[derive(Clone, Debug, Default)]
-pub enum ActiveSequencer {
+pub enum SequencerSlot {
     #[default]
     Left,
     Right,
@@ -16,7 +16,7 @@ pub struct SharedState {
     pub playing: bool,
     pub bpm: f32,
     pub midi_channel: u8,
-    pub active_sequencer: ActiveSequencer,
+    pub active_sequencer: SequencerSlot,
     pub left_state: EuclideanSequencerState,
     pub right_state: EuclideanSequencerState,
     pub mixer_state: MixerState,
@@ -30,7 +30,7 @@ impl SharedState {
             playing: false,
             bpm,
             midi_channel: 0,
-            active_sequencer: ActiveSequencer::Left,
+            active_sequencer: SequencerSlot::Left,
             left_state: EuclideanSequencerState::new(),
             right_state: EuclideanSequencerState::new(),
             mixer_state: MixerState::new(),
@@ -53,43 +53,43 @@ impl SharedState {
 
     pub fn increase_steps(&mut self) {
         match self.active_sequencer {
-            ActiveSequencer::Left => self.left_state.increase_steps(),
-            ActiveSequencer::Right => self.right_state.increase_steps(),
+            SequencerSlot::Left => self.left_state.increase_steps(),
+            SequencerSlot::Right => self.right_state.increase_steps(),
         }
     }
 
     pub fn decrease_steps(&mut self) {
         match self.active_sequencer {
-            ActiveSequencer::Left => self.left_state.decrease_steps(),
-            ActiveSequencer::Right => self.right_state.decrease_steps(),
+            SequencerSlot::Left => self.left_state.decrease_steps(),
+            SequencerSlot::Right => self.right_state.decrease_steps(),
         }
     }
 
     pub fn increase_pulses(&mut self) {
         match self.active_sequencer {
-            ActiveSequencer::Left => self.left_state.increase_pulses(),
-            ActiveSequencer::Right => self.right_state.increase_pulses(),
+            SequencerSlot::Left => self.left_state.increase_pulses(),
+            SequencerSlot::Right => self.right_state.increase_pulses(),
         }
     }
 
     pub fn decrease_pulses(&mut self) {
         match self.active_sequencer {
-            ActiveSequencer::Left => self.left_state.decrease_pulses(),
-            ActiveSequencer::Right => self.right_state.decrease_pulses(),
+            SequencerSlot::Left => self.left_state.decrease_pulses(),
+            SequencerSlot::Right => self.right_state.decrease_pulses(),
         }
     }
 
     pub fn change_pitch(&mut self, amount: i8) {
         match self.active_sequencer {
-            ActiveSequencer::Left => self.left_state.change_pitch(amount),
-            ActiveSequencer::Right => self.right_state.change_pitch(amount),
+            SequencerSlot::Left => self.left_state.change_pitch(amount),
+            SequencerSlot::Right => self.right_state.change_pitch(amount),
         }
     }
 
     pub fn switch_active_sequencer(&mut self) {
         match self.active_sequencer {
-            ActiveSequencer::Left => self.active_sequencer = ActiveSequencer::Right,
-            ActiveSequencer::Right => self.active_sequencer = ActiveSequencer::Left,
+            SequencerSlot::Left => self.active_sequencer = SequencerSlot::Right,
+            SequencerSlot::Right => self.active_sequencer = SequencerSlot::Left,
         }
         info!("Switched sequencer to {:?}", self.active_sequencer);
     }

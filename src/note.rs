@@ -11,7 +11,7 @@ pub enum NoteDuration {
     Whole = 16,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Note {
     pub pitch: u8,
     pub velocity: u8,
@@ -87,7 +87,7 @@ impl Debug for Sequence {
 
 impl Default for Sequence {
     fn default() -> Self {
-        let notes = vec![Note::new(0, 0, NoteDuration::Sixteenth, 120.0)];
+        let notes = vec![Note::new(0, 0, NoteDuration::Sixteenth, 120.0); 16];
         Sequence { notes }
     }
 }

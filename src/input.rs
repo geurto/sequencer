@@ -5,10 +5,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{mpsc, RwLock};
 
-use crate::sequencers::euclidean::state::{EuclideanSequencerInput, EuclideanSequencerState};
-use crate::sequencers::mixer::state::{MixerInput, MixerState};
+use crate::sequencers::euclidean::state::EuclideanSequencerInput;
+use crate::sequencers::mixer::state::MixerInput;
 use crate::state::SharedState;
 
 pub enum Input {
@@ -42,9 +42,6 @@ pub fn start_polling(tx: mpsc::Sender<HashSet<Keycode>>) {
 pub async fn run_input_handler(
     mut rx: mpsc::Receiver<HashSet<Keycode>>,
     state: Arc<RwLock<SharedState>>,
-    tx_left: broadcast::Sender<EuclideanSequencerState>,
-    tx_right: broadcast::Sender<EuclideanSequencerState>,
-    tx_mixer: broadcast::Sender<MixerState>,
 ) -> Result<()> {
     let mut last_keys = HashSet::new();
 
@@ -81,10 +78,6 @@ pub async fn run_input_handler(
                     _ => {}
                 };
             }
-
-            tx_left.send(w_state.left_state.clone())?;
-            tx_right.send(w_state.right_state.clone())?;
-            tx_mixer.send(w_state.mixer_state.clone())?;
         }
 
         last_keys = keys;
