@@ -135,8 +135,16 @@ fn poll() -> impl Stream<Item = Event> {
         loop {
             use iced_futures::futures::StreamExt;
 
-            let input = receiver.select_next_some().await;
-            info!("poll received input {:?}", input);
+            match receiver.select_next_some().await {
+                Message::ReceivedEvent(event) => output
+                    .send(event)
+                    .await
+                    .expect("Failed to send Message::ReceivedEvent"),
+                Message::LeftSequencer(msg) => info!("Received Message::LeftSequencer: {:?}", msg),
+                Message::RightSequencer(msg) => {
+                    info!("Received Message::RightSequencer: {:?}", msg)
+                }
+            };
         }
     })
 }
