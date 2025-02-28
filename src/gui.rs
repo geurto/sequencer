@@ -90,7 +90,7 @@ impl Gui {
                 .width(Length::FillPortion(1))
                 .height(Length::Fill);
 
-        let content = row![sequencer_left_view, sequencer_right_view].spacing(20);
+        let sequencer_content = row![sequencer_left_view, sequencer_right_view].spacing(20);
         container(content)
             .width(Length::Fill)
             .height(Length::Fill)

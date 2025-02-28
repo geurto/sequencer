@@ -1,3 +1,4 @@
+pub mod gui;
 pub mod state;
 
 use crate::{note::Sequence, SharedState};
