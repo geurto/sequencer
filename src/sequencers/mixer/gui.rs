@@ -1,4 +1,8 @@
-use iced::{widget::slider, Element, Subscription};
+use iced::{
+    widget::{column, container, slider, text},
+    Alignment::Center,
+    Element, Length, Subscription,
+};
 use log::info;
 
 use super::state::MixerState;
@@ -27,7 +31,6 @@ impl Gui {
     pub fn update(&mut self, message: Message) {
         match message {
             Message::FromApp(new_state) => {
-                info!("Received new FromApp Mixer state: {:?}", new_state);
                 self.state = new_state;
             }
             Message::RatioChanged(ratio) => {
@@ -38,7 +41,21 @@ impl Gui {
     }
 
     pub fn view(&self) -> Element<Message> {
-        slider(0.0..=1.0, self.state.ratio, Message::RatioChanged).into()
+        let slider = slider(0.0..=1.0, self.state.ratio, Message::RatioChanged);
+        let content = column![
+            text!("Mixer"),
+            slider,
+            text!("[R / F] Increase / Decrease Ratio")
+        ]
+        .align_x(Center)
+        .spacing(20);
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Center)
+            .align_y(Center)
+            .into()
     }
 }
 

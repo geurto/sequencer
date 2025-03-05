@@ -7,8 +7,6 @@ use iced::{
     Color, Element, Length, Point, Renderer, Subscription,
 };
 
-use log::info;
-
 use super::state::EuclideanSequencerState;
 
 const FILL_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
@@ -42,10 +40,6 @@ impl Gui {
     pub fn update(&mut self, message: Message) {
         match message {
             Message::FromApp(new_state) => {
-                info!(
-                    "EuclideanGui #{}: Updating state: pulses={}, steps={}",
-                    self.index, new_state.pulses, new_state.steps
-                );
                 self.state = new_state;
             }
         }
@@ -53,7 +47,7 @@ impl Gui {
 
     pub fn view(&self) -> Element<Message> {
         let canvas = Canvas::new(self).width(Length::Fill).height(Length::Fill);
-        let content = column![canvas, text!("Sequencer {0}", self.index)];
+        let content = column![canvas, text!("Sequencer {0}", self.index)].align_x(Center);
         container(content)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -75,6 +69,9 @@ impl canvas::Program<Message> for Gui {
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
+        let center = frame.center();
+        let start_x = center.x - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
+        let start_y = center.y - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
 
         let beat_locations = (0..self.state.pulses)
             .map(|i| (i * self.state.steps) / self.state.pulses)
@@ -83,8 +80,8 @@ impl canvas::Program<Message> for Gui {
         for row in 0..4 {
             for col in 0..4 {
                 let center = Point::new(
-                    CIRCLE_SPACING * (col as f32 + 0.5),
-                    CIRCLE_SPACING * (row as f32 + 0.5),
+                    start_x + CIRCLE_SPACING * (col as f32 + 0.5),
+                    start_y + CIRCLE_SPACING * (row as f32 + 0.5),
                 );
 
                 let circle = Path::circle(center, CIRCLE_RADIUS);

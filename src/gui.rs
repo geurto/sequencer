@@ -46,12 +46,10 @@ impl Gui {
         }
     }
     pub fn subscription(&self) -> Subscription<Message> {
-        info!("Main GUI subscription");
         Subscription::run(poll).map(Message::ReceivedEvent)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        info!("Main GUI update");
         match message {
             Message::ReceivedEvent(event) => match event {
                 Event::Connected(sender) => {
@@ -69,6 +67,8 @@ impl Gui {
                         .update(EuclideanGuiMessage::FromApp(state.left_state));
                     self.sequencer_right
                         .update(EuclideanGuiMessage::FromApp(state.right_state));
+                    self.mixer
+                        .update(MixerGuiMessage::FromApp(state.mixer_state));
                 }
             },
             Message::LeftSequencer(state) => {
@@ -101,7 +101,7 @@ impl Gui {
         let mixer_content = Container::new(self.mixer.view().map(Message::Mixer))
             .width(Length::Fill)
             .height(Length::Fill);
-        let content = column![sequencer_content, mixer_content];
+        let content = column![sequencer_content, mixer_content].spacing(50);
 
         container(content)
             .width(Length::Fill)
