@@ -9,9 +9,12 @@ use tokio::signal;
 use tokio::sync::{mpsc, RwLock};
 
 use sequencer::{
-    gui::Message, run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui,
-    start_polling, state::SequencerSlot, EuclideanSequencer, Gui, MidiHandler, Mixer,
-    PlaybackHandler, Sequence, Sequencer, SharedState,
+    gui::Message,
+    run_input_handler,
+    sequencers::{euclidean::gui::Gui as EuclideanGui, mixer::gui::Gui as MixerGui},
+    start_polling,
+    state::SequencerSlot,
+    EuclideanSequencer, Gui, MidiHandler, Mixer, PlaybackHandler, Sequence, Sequencer, SharedState,
 };
 
 #[tokio::main]
@@ -71,12 +74,13 @@ async fn main() -> Result<()> {
     // GUI
     let gui_sequencer_left = EuclideanGui::new(1);
     let gui_sequencer_right = EuclideanGui::new(2);
+    let gui_mixer = MixerGui::new();
 
     Gui::run(
         tx_gui.clone(),
-        shared_state.clone(),
         gui_sequencer_left,
         gui_sequencer_right,
+        gui_mixer,
     )?;
 
     // Shutdown

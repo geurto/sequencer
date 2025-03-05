@@ -12,6 +12,7 @@ use log::info;
 use super::state::EuclideanSequencerState;
 
 const FILL_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
+const INACTIVE_COLOR: Color = Color::from_rgb(0.23, 0.11, 0.27);
 const BACKGROUND_COLOR: Color = Color::from_rgb(0., 0., 0.);
 const CIRCLE_RADIUS: f32 = 20.0;
 const CIRCLE_SPACING: f32 = 60.0;
@@ -89,6 +90,8 @@ impl canvas::Program<Message> for Gui {
                 let circle = Path::circle(center, CIRCLE_RADIUS);
                 let color = if beat_locations.contains(&(4 * row + col)) {
                     FILL_COLOR
+                } else if 4 * row + col >= self.state.steps {
+                    INACTIVE_COLOR
                 } else {
                     BACKGROUND_COLOR
                 };

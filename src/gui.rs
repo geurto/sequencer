@@ -1,45 +1,48 @@
 use crate::{
-    sequencers::euclidean::gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage},
+    sequencers::{
+        euclidean::gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage},
+        mixer::gui::{Gui as MixerGui, Message as MixerGuiMessage},
+    },
     SharedState,
 };
 use iced::{
     futures::{channel::mpsc, SinkExt, Stream},
     stream,
-    widget::{container, row, Container},
+    widget::{column, container, row, Container},
     Element, Length, Subscription, Task, Theme,
 };
 use log::{error, info};
 use std::sync::{Arc, Mutex};
-use tokio::sync::RwLock;
 
 #[derive(Debug)]
 pub enum Message {
     ReceivedEvent(Event),
     LeftSequencer(EuclideanGuiMessage),
     RightSequencer(EuclideanGuiMessage),
+    Mixer(MixerGuiMessage),
 }
 
 pub struct Gui {
     tx_gui: Arc<Mutex<Option<mpsc::Sender<Message>>>>,
-    shared_state: Arc<RwLock<SharedState>>,
     cached_state: Option<SharedState>,
     sequencer_left: EuclideanGui,
     sequencer_right: EuclideanGui,
+    mixer: MixerGui,
 }
 
 impl Gui {
     fn new(
         tx_gui: Arc<Mutex<Option<mpsc::Sender<Message>>>>,
-        shared_state: Arc<RwLock<SharedState>>,
         sequencer_left: EuclideanGui,
         sequencer_right: EuclideanGui,
+        mixer: MixerGui,
     ) -> Self {
         Self {
             tx_gui,
-            shared_state,
             cached_state: None,
             sequencer_left,
             sequencer_right,
+            mixer,
         }
     }
     pub fn subscription(&self) -> Subscription<Message> {
@@ -74,6 +77,9 @@ impl Gui {
             Message::RightSequencer(state) => {
                 info!("Right sequencer message in Main GUI update: {:?}", state)
             }
+            Message::Mixer(state) => {
+                info!("Mixer message in Main GUI update: {:?}", state)
+            }
         }
 
         Task::none()
@@ -91,6 +97,12 @@ impl Gui {
                 .height(Length::Fill);
 
         let sequencer_content = row![sequencer_left_view, sequencer_right_view].spacing(20);
+
+        let mixer_content = Container::new(self.mixer.view().map(Message::Mixer))
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let content = column![sequencer_content, mixer_content];
+
         container(content)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -99,9 +111,9 @@ impl Gui {
 
     pub fn run(
         tx_gui: Arc<Mutex<Option<mpsc::Sender<Message>>>>,
-        shared_state: Arc<RwLock<SharedState>>,
         sequencer_left: EuclideanGui,
         sequencer_right: EuclideanGui,
+        mixer: MixerGui,
     ) -> iced::Result {
         iced::application("Sequencer", Gui::update, Gui::view)
             .subscription(|gui| gui.subscription())
@@ -110,7 +122,7 @@ impl Gui {
             .centered()
             .run_with(|| {
                 (
-                    Self::new(tx_gui, shared_state, sequencer_left, sequencer_right),
+                    Self::new(tx_gui, sequencer_left, sequencer_right, mixer),
                     Task::none(),
                 )
             })
@@ -143,6 +155,9 @@ fn poll() -> impl Stream<Item = Event> {
                 Message::LeftSequencer(msg) => info!("Received Message::LeftSequencer: {:?}", msg),
                 Message::RightSequencer(msg) => {
                     info!("Received Message::RightSequencer: {:?}", msg)
+                }
+                Message::Mixer(msg) => {
+                    info!("Received Message::Mixer: {:?}", msg)
                 }
             };
         }
