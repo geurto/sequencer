@@ -70,8 +70,8 @@ impl Sequencer for EuclideanSequencer {
 
         loop {
             let state = match self.sequencer_slot {
-                SequencerSlot::Left => self.shared_state.read().await.left_state.clone(),
-                SequencerSlot::Right => self.shared_state.read().await.right_state.clone(),
+                SequencerSlot::Left => self.shared_state.read().await.left_state,
+                SequencerSlot::Right => self.shared_state.read().await.right_state,
             };
 
             if state != previous_state {
@@ -79,7 +79,7 @@ impl Sequencer for EuclideanSequencer {
                     "Euclidean sequencer {:?} new state: {:?}",
                     self.sequencer_slot, state
                 );
-                self.cached_state = state.clone();
+                self.cached_state = state;
                 let sequence = self.generate_sequence().await;
                 {
                     match self.sequencer_slot {

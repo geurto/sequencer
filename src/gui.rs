@@ -64,9 +64,9 @@ impl Gui {
                     self.cached_state = Some(state.clone());
 
                     self.sequencer_left
-                        .update(EuclideanGuiMessage::FromApp(state.left_state));
+                        .update(EuclideanGuiMessage::FromApp(state.clone()));
                     self.sequencer_right
-                        .update(EuclideanGuiMessage::FromApp(state.right_state));
+                        .update(EuclideanGuiMessage::FromApp(state.clone()));
                     self.mixer
                         .update(MixerGuiMessage::FromApp(state.mixer_state));
                 }

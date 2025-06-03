@@ -13,7 +13,7 @@ pub enum EuclideanSequencerInput {
     DecreaseOctave,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct EuclideanSequencerState {
     pub steps: usize,
     pub pulses: usize,

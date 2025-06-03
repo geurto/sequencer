@@ -7,28 +7,29 @@ use iced::{
     Color, Element, Length, Point, Renderer, Subscription,
 };
 
-use super::state::EuclideanSequencerState;
+use crate::SharedState;
 
 const FILL_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
 const INACTIVE_COLOR: Color = Color::from_rgb(0.23, 0.11, 0.27);
+const CURRENT_NOTE_COLOR: Color = Color::from_rgb(0.69, 0.34, 0.81);
 const BACKGROUND_COLOR: Color = Color::from_rgb(0., 0., 0.);
 const CIRCLE_RADIUS: f32 = 20.0;
 const CIRCLE_SPACING: f32 = 60.0;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    FromApp(EuclideanSequencerState),
+    FromApp(SharedState),
 }
 
 pub struct Gui {
-    state: EuclideanSequencerState,
+    state: SharedState,
     index: usize,
 }
 
 impl Gui {
     pub fn new(index: usize) -> Self {
         Self {
-            state: EuclideanSequencerState::new(),
+            state: SharedState::new(120.0),
             index,
         }
     }
@@ -73,8 +74,14 @@ impl canvas::Program<Message> for Gui {
         let start_x = center.x - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
         let start_y = center.y - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
 
-        let beat_locations = (0..self.state.pulses)
-            .map(|i| (i * self.state.steps) / self.state.pulses)
+        let sequencer_state = if self.index == 0 {
+            self.state.left_state
+        } else {
+            self.state.right_state
+        };
+
+        let beat_locations = (0..sequencer_state.pulses)
+            .map(|i| (i * sequencer_state.steps) / sequencer_state.pulses)
             .collect::<Vec<_>>();
 
         for row in 0..4 {
@@ -87,7 +94,7 @@ impl canvas::Program<Message> for Gui {
                 let circle = Path::circle(center, CIRCLE_RADIUS);
                 let color = if beat_locations.contains(&(4 * row + col)) {
                     FILL_COLOR
-                } else if 4 * row + col >= self.state.steps {
+                } else if 4 * row + col >= sequencer_state.steps {
                     INACTIVE_COLOR
                 } else {
                     BACKGROUND_COLOR
@@ -95,7 +102,12 @@ impl canvas::Program<Message> for Gui {
 
                 let bg_circle = Path::circle(center, CIRCLE_RADIUS + 2.);
                 frame.fill(&bg_circle, FILL_COLOR);
-                frame.fill(&circle, color);
+
+                if 4 * row + col == self.state.current_note_index % sequencer_state.steps {
+                    frame.fill(&circle, CURRENT_NOTE_COLOR);
+                } else {
+                    frame.fill(&circle, color);
+                }
             }
         }
         vec![frame.into_geometry()]
