@@ -36,6 +36,7 @@ impl PlaybackHandler {
             if let Ok(seq) = self.rx_sequence.try_recv() {
                 info!("Received new sequence: {:?}", seq);
                 sequence = seq;
+                current_note_index %= sequence.notes.len();
             }
 
             let r_state = self.shared_state.read().await;
