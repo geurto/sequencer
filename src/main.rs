@@ -67,13 +67,18 @@ async fn main() -> Result<()> {
 
     // Playback
     let midi_handler = MidiHandler::new()?;
-    let mut playback_handler =
-        PlaybackHandler::new(midi_handler, rx_mixed_sequence, shared_state.clone());
+    let tx_gui_playback = tx_gui.clone();
+    let mut playback_handler = PlaybackHandler::new(
+        midi_handler,
+        rx_mixed_sequence,
+        tx_gui_playback,
+        shared_state.clone(),
+    );
     tokio::spawn(async move { playback_handler.run().await });
 
     // GUI
-    let gui_sequencer_left = EuclideanGui::new(1);
-    let gui_sequencer_right = EuclideanGui::new(2);
+    let gui_sequencer_left = EuclideanGui::new(0);
+    let gui_sequencer_right = EuclideanGui::new(1);
     let gui_mixer = MixerGui::new();
 
     Gui::run(

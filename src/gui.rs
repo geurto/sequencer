@@ -60,7 +60,6 @@ impl Gui {
                 }
                 Event::Disconnected => info!("Sender Disconnected"),
                 Event::StateChanged(state) => {
-                    info!("Received state");
                     self.cached_state = Some(state.clone());
 
                     self.sequencer_left
