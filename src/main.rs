@@ -77,8 +77,8 @@ async fn main() -> Result<()> {
     tokio::spawn(async move { playback_handler.run().await });
 
     // GUI
-    let gui_sequencer_left = EuclideanGui::new(0);
-    let gui_sequencer_right = EuclideanGui::new(1);
+    let gui_sequencer_left = EuclideanGui::new(SequencerSlot::Left);
+    let gui_sequencer_right = EuclideanGui::new(SequencerSlot::Right);
     let gui_mixer = MixerGui::new();
 
     Gui::run(

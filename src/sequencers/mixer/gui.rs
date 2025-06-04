@@ -1,11 +1,18 @@
 use iced::{
-    widget::{column, container, slider, text},
+    border::Radius,
+    font,
+    widget::{
+        column, container,
+        slider::{self, Handle, Rail, Style},
+        text,
+    },
     Alignment::Center,
-    Element, Length, Subscription,
+    Element, Font, Length, Subscription, Theme,
 };
 use log::info;
 
-use super::state::MixerState;
+use crate::gui::CustomTheme;
+use crate::sequencers::mixer::MixerState;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -15,12 +22,14 @@ pub enum Message {
 
 pub struct Gui {
     state: MixerState,
+    theme: CustomTheme,
 }
 
 impl Gui {
     pub fn new() -> Self {
         Self {
             state: MixerState::new(),
+            theme: CustomTheme::default(),
         }
     }
 
@@ -41,11 +50,34 @@ impl Gui {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let slider = slider(0.0..=1.0, self.state.ratio, Message::RatioChanged);
+        let rail = Rail {
+            backgrounds: (
+                iced::Background::Color(self.theme.overlay_color),
+                iced::Background::Color(self.theme.surface_color),
+            ),
+            width: 5.,
+            border: iced::Border {
+                color: self.theme.accent_color_muted,
+                width: 2.,
+                radius: Radius::default(),
+            },
+        };
+        let handle = Handle {
+            shape: slider::HandleShape::Rectangle {
+                width: 10,
+                border_radius: Radius::default(),
+            },
+            background: iced::Background::Color(self.theme.overlay_color),
+            border_width: 2.,
+            border_color: self.theme.accent_color,
+        };
+        let slider = slider(0.0..=1.0, self.state.ratio, Message::RatioChanged)
+            .style(Style { rail, handle });
         let content = column![
-            text!("Mixer"),
+            text("Mixer")
+                .color(self.theme.primary_text_color)
+                .font(self.theme.bold_font),
             slider,
-            text!("[R / F] Increase / Decrease Ratio")
         ]
         .align_x(Center)
         .spacing(20);

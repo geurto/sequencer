@@ -1,18 +1,14 @@
 use iced::{
     widget::{
         canvas::{self, Canvas, Frame, Path},
-        column, container, text,
+        column, container,
     },
     Alignment::Center,
     Color, Element, Length, Point, Renderer, Subscription,
 };
 
-use crate::SharedState;
+use crate::{gui::CustomTheme, state::SequencerSlot, SharedState};
 
-const FILL_COLOR: Color = Color::from_rgb(0.46, 0.23, 0.54);
-const INACTIVE_COLOR: Color = Color::from_rgb(0.23, 0.11, 0.27);
-const CURRENT_NOTE_COLOR: Color = Color::from_rgb(0.69, 0.34, 0.81);
-const BACKGROUND_COLOR: Color = Color::from_rgb(0., 0., 0.);
 const CIRCLE_RADIUS: f32 = 20.0;
 const CIRCLE_SPACING: f32 = 60.0;
 
@@ -23,14 +19,16 @@ pub enum Message {
 
 pub struct Gui {
     state: SharedState,
-    index: usize,
+    slot: SequencerSlot,
+    theme: CustomTheme,
 }
 
 impl Gui {
-    pub fn new(index: usize) -> Self {
+    pub fn new(slot: SequencerSlot) -> Self {
         Self {
             state: SharedState::new(120.0),
-            index,
+            slot,
+            theme: CustomTheme::default(),
         }
     }
 
@@ -48,7 +46,7 @@ impl Gui {
 
     pub fn view(&self) -> Element<Message> {
         let canvas = Canvas::new(self).width(Length::Fill).height(Length::Fill);
-        let content = column![canvas, text!("Sequencer {0}", self.index)].align_x(Center);
+        let content = column![canvas].align_x(Center);
         container(content)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -74,7 +72,7 @@ impl canvas::Program<Message> for Gui {
         let start_x = center.x - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
         let start_y = center.y - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
 
-        let sequencer_state = if self.index == 0 {
+        let sequencer_state = if self.slot == SequencerSlot::Left {
             self.state.left_state
         } else {
             self.state.right_state
@@ -93,18 +91,22 @@ impl canvas::Program<Message> for Gui {
 
                 let circle = Path::circle(center, CIRCLE_RADIUS);
                 let color = if beat_locations.contains(&(4 * row + col)) {
-                    FILL_COLOR
+                    self.theme.accent_color
                 } else if 4 * row + col >= sequencer_state.steps {
-                    INACTIVE_COLOR
+                    self.theme.accent_color_muted
                 } else {
-                    BACKGROUND_COLOR
+                    self.theme.surface_color
                 };
 
-                let bg_circle = Path::circle(center, CIRCLE_RADIUS + 2.);
-                frame.fill(&bg_circle, FILL_COLOR);
+                let bg_circle = if self.state.active_sequencer == self.slot {
+                    Path::circle(center, CIRCLE_RADIUS + 4.)
+                } else {
+                    Path::circle(center, CIRCLE_RADIUS + 2.)
+                };
+                frame.fill(&bg_circle, self.theme.primary_color_muted);
 
                 if 4 * row + col == self.state.current_note_index % sequencer_state.steps {
-                    frame.fill(&circle, CURRENT_NOTE_COLOR);
+                    frame.fill(&circle, self.theme.primary_color);
                 } else {
                     frame.fill(&circle, color);
                 }
