@@ -31,7 +31,7 @@ pub struct CustomTheme {
     pub secondary_color: Color,
     pub secondary_color_muted: Color,
     pub primary_text_color: Color,
-    secondary_text_color: Color,
+    pub secondary_text_color: Color,
     pub text_color: Color,
     pub surface_color: Color,
     pub overlay_color: Color,
@@ -43,6 +43,7 @@ pub struct CustomTheme {
 
 impl Default for CustomTheme {
     fn default() -> Self {
+        // All colors taken from Catppuccin Mocha
         Self {
             primary_color: color!(0xcba6f7),       // Mauve
             primary_color_muted: color!(0x65537b), // Muted mauve

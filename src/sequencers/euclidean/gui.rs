@@ -4,7 +4,7 @@ use iced::{
         column, container,
     },
     Alignment::Center,
-    Color, Element, Length, Point, Renderer, Subscription,
+    Element, Length, Point, Renderer, Subscription,
 };
 
 use crate::{gui::CustomTheme, state::SequencerSlot, SharedState};

@@ -6,12 +6,12 @@ use tokio::time::{sleep, Duration};
 
 use crate::gui::{Event, Message};
 use crate::midi::MidiHandler;
-use crate::note::Sequence;
+use crate::note::MixedSequence;
 use crate::state::*;
 
 pub struct PlaybackHandler {
     midi_handler: MidiHandler,
-    rx_sequence: mpsc::Receiver<Sequence>,
+    rx_sequence: mpsc::Receiver<MixedSequence>,
     tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,
     shared_state: Arc<RwLock<SharedState>>,
 }
@@ -19,7 +19,7 @@ pub struct PlaybackHandler {
 impl PlaybackHandler {
     pub fn new(
         midi_handler: MidiHandler,
-        rx_sequence: mpsc::Receiver<Sequence>,
+        rx_sequence: mpsc::Receiver<MixedSequence>,
         tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,
         shared_state: Arc<RwLock<SharedState>>,
     ) -> Self {
@@ -34,11 +34,15 @@ impl PlaybackHandler {
     pub async fn run(&mut self) -> Result<()> {
         info!("Starting playback loop");
         let mut current_note_index = 0;
-        let mut sequence = Sequence::default();
+        let mut sequence = MixedSequence::default();
 
         loop {
             if let Ok(seq) = self.rx_sequence.try_recv() {
-                info!("Received new sequence: {:?}", seq);
+                debug!(
+                    "Received new sequence: {:?} of length {}",
+                    seq,
+                    seq.notes.len()
+                );
                 sequence = seq;
                 current_note_index = if sequence.notes.is_empty() {
                     0
@@ -58,17 +62,16 @@ impl PlaybackHandler {
                     continue;
                 }
 
-                let note = &sequence.notes[current_note_index];
-                debug!("Playing note: {:?} at index {}", note, current_note_index);
+                let note = sequence.notes[current_note_index];
+                debug!(
+                    "Playing note: {:?} at index {}/{}",
+                    note,
+                    current_note_index,
+                    sequence.notes.len()
+                );
 
-                let note_duration = note.duration as u64;
                 self.midi_handler
-                    .play_note(
-                        note.pitch,
-                        note_duration,
-                        note.velocity,
-                        midi_channel_for_note,
-                    )
+                    .play_multiple_notes(note, midi_channel_for_note)
                     .await;
 
                 // Move to the next note

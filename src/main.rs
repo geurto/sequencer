@@ -10,6 +10,7 @@ use tokio::sync::{mpsc, RwLock};
 
 use sequencer::{
     gui::Message,
+    note::MixedSequence,
     run_input_handler,
     sequencers::{euclidean::gui::Gui as EuclideanGui, mixer::gui::Gui as MixerGui},
     start_polling,
@@ -28,7 +29,7 @@ async fn main() -> Result<()> {
     let (tx_sequence, rx_sequence) = mpsc::channel::<(Option<Sequence>, Option<Sequence>)>(1);
 
     // final sequence for playback - Sequence
-    let (tx_mixed_sequence, rx_mixed_sequence) = mpsc::channel::<Sequence>(1);
+    let (tx_mixed_sequence, rx_mixed_sequence) = mpsc::channel::<MixedSequence>(1);
 
     let shared_state: Arc<RwLock<SharedState>> = Arc::new(RwLock::new(SharedState::new(120.)));
 

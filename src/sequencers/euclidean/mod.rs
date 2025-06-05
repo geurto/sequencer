@@ -42,7 +42,7 @@ impl Sequencer for EuclideanSequencer {
             // Handle zero pulses case
             let note = Note::new(0, 0, NoteDuration::Sixteenth, bpm);
             return Sequence {
-                notes: vec![note; 16],
+                notes: vec![note; self.cached_state.steps],
             };
         }
 
@@ -61,7 +61,11 @@ impl Sequencer for EuclideanSequencer {
             };
             sequence.notes.push(note);
         }
-        debug!("Generated sequence {:?}", sequence);
+        debug!(
+            "Generated sequence {:?} of length {}",
+            sequence,
+            sequence.notes.len()
+        );
         sequence
     }
 

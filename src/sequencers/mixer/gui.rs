@@ -1,13 +1,12 @@
 use iced::{
     border::Radius,
-    font,
     widget::{
         column, container,
-        slider::{self, Handle, Rail, Style},
+        slider::{self, Handle, Rail, Status, Style},
         text,
     },
     Alignment::Center,
-    Element, Font, Length, Subscription, Theme,
+    Background, Border, Element, Length, Subscription,
 };
 use log::info;
 
@@ -50,29 +49,47 @@ impl Gui {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let rail = Rail {
-            backgrounds: (
-                iced::Background::Color(self.theme.overlay_color),
-                iced::Background::Color(self.theme.surface_color),
-            ),
-            width: 5.,
-            border: iced::Border {
-                color: self.theme.accent_color_muted,
-                width: 2.,
-                radius: Radius::default(),
-            },
-        };
-        let handle = Handle {
-            shape: slider::HandleShape::Rectangle {
-                width: 10,
-                border_radius: Radius::default(),
-            },
-            background: iced::Background::Color(self.theme.overlay_color),
-            border_width: 2.,
-            border_color: self.theme.accent_color,
-        };
-        let slider = slider(0.0..=1.0, self.state.ratio, Message::RatioChanged)
-            .style(Style { rail, handle });
+        let theme = &self.theme;
+        let slider = iced::widget::slider(0.0..=1.0, self.state.ratio, Message::RatioChanged)
+            .style(move |_: &iced::Theme, status: Status| {
+                let handle_color = match status {
+                    Status::Hovered => theme.accent_color,
+                    Status::Dragged => theme.primary_color,
+                    Status::Active => theme.primary_color_muted,
+                };
+
+                let rail_backgrounds = match status {
+                    Status::Hovered => (
+                        Background::Color(theme.primary_color_muted),
+                        Background::Color(theme.surface_color),
+                    ),
+                    _ => (
+                        Background::Color(theme.overlay_color),
+                        Background::Color(theme.surface_color),
+                    ),
+                };
+
+                Style {
+                    rail: Rail {
+                        backgrounds: rail_backgrounds,
+                        width: 5.,
+                        border: Border {
+                            color: theme.accent_color_muted,
+                            width: 2.,
+                            radius: Radius::default(),
+                        },
+                    },
+                    handle: Handle {
+                        shape: slider::HandleShape::Rectangle {
+                            width: 10,
+                            border_radius: Radius::default(),
+                        },
+                        background: Background::Color(handle_color),
+                        border_width: 2.,
+                        border_color: theme.accent_color,
+                    },
+                }
+            });
         let content = column![
             text("Mixer")
                 .color(self.theme.primary_text_color)

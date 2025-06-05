@@ -1,5 +1,7 @@
 use std::fmt::{Debug, Formatter};
 
+/// NoteDuration is a helper enum to define note durations in musical notation. These durations are
+/// then converted to seconds in playback.
 pub enum NoteDuration {
     Sixteenth = 1,
     Eighth = 2,
@@ -11,6 +13,7 @@ pub enum NoteDuration {
     Whole = 16,
 }
 
+/// A Note is a MIDI object with pitch, velocity, duration, and a channel. Duration here is in seconds.
 #[derive(Clone, Copy, Debug)]
 pub struct Note {
     pub pitch: u8,
@@ -39,6 +42,7 @@ impl Note {
     }
 }
 
+/// A Sequence is defined as a vector of Notes, produced by one single Sequencer.
 #[derive(Clone)]
 pub struct Sequence {
     pub notes: Vec<Note>,
@@ -89,5 +93,36 @@ impl Default for Sequence {
     fn default() -> Self {
         let notes = vec![Note::new(0, 0, NoteDuration::Sixteenth, 120.0); 16];
         Sequence { notes }
+    }
+}
+
+/// A MixedSequence is the result of mixing two Sequences in the Mixer.
+#[derive(Debug)]
+pub struct MixedSequence {
+    pub notes: Vec<(Option<Note>, Option<Note>)>,
+}
+
+impl MixedSequence {
+    pub fn new() -> Self {
+        Self {
+            notes: Vec::default(),
+        }
+    }
+
+    pub fn push(&mut self, note: (Option<Note>, Option<Note>)) {
+        self.notes.push(note);
+    }
+}
+
+impl Default for MixedSequence {
+    fn default() -> Self {
+        let notes = vec![
+            (
+                Some(Note::new(0, 0, NoteDuration::Sixteenth, 120.0)),
+                Some(Note::new(0, 0, NoteDuration::Sixteenth, 120.0))
+            );
+            16
+        ];
+        MixedSequence { notes }
     }
 }

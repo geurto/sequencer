@@ -40,6 +40,7 @@ pub fn start_polling(tx: mpsc::Sender<HashSet<Keycode>>) {
     });
 }
 
+// TODO merge this with playback so that all state writing is done in one location
 pub async fn run_input_handler(
     mut rx: mpsc::Receiver<HashSet<Keycode>>,
     tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,

@@ -1,3 +1,4 @@
+use crate::note::Note;
 use crate::state::SharedState;
 
 use anyhow::{anyhow, Context, Result};
@@ -5,11 +6,12 @@ use log::{info, warn};
 use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
+use tokio::task;
 use tokio::time::{sleep, Duration};
 
 pub struct MidiHandler {
-    conn_out: MidiOutputConnection,
+    conn_out: Arc<Mutex<MidiOutputConnection>>,
     conn_in: Option<MidiInputConnection<()>>,
 }
 
@@ -47,19 +49,63 @@ impl MidiHandler {
             .map_err(|e| anyhow!("Failed to connect to MIDI output: {}", e))?;
 
         Ok(Self {
-            conn_out,
+            conn_out: Arc::new(Mutex::new(conn_out)),
             conn_in: None,
         })
     }
 
-    pub async fn play_note(&mut self, note: u8, duration: u64, velocity: u8, channel: u8) {
-        self.conn_out
-            .send(&[NOTE_ON_MSG, note, velocity, channel])
-            .expect("Failed to send NOTE_ON_MSG");
-        sleep(Duration::from_millis(duration)).await;
-        self.conn_out
-            .send(&[NOTE_OFF_MSG, note, velocity, channel])
-            .expect("Failed to send NOTE_OFF_MSG");
+    pub async fn play_multiple_notes(&mut self, notes: (Option<Note>, Option<Note>), channel: u8) {
+        match notes {
+            (None, None) => {}
+            (Some(note_a), None) => {
+                play_note(
+                    Arc::clone(&self.conn_out),
+                    note_a.pitch,
+                    note_a.duration as u64,
+                    note_a.velocity,
+                    channel,
+                )
+                .await
+            }
+            (None, Some(note_b)) => {
+                play_note(
+                    Arc::clone(&self.conn_out),
+                    note_b.pitch,
+                    note_b.duration as u64,
+                    note_b.velocity,
+                    channel,
+                )
+                .await
+            }
+            (Some(note_a), Some(note_b)) => {
+                let conn_a = Arc::clone(&self.conn_out);
+                let conn_b = Arc::clone(&self.conn_out);
+
+                let task_a = task::spawn(async move {
+                    play_note(
+                        conn_a,
+                        note_a.pitch,
+                        note_a.duration as u64,
+                        note_a.velocity,
+                        channel,
+                    )
+                    .await;
+                });
+
+                let task_b = task::spawn(async move {
+                    play_note(
+                        conn_b,
+                        note_b.pitch,
+                        note_b.duration as u64,
+                        note_b.velocity,
+                        channel,
+                    )
+                    .await;
+                });
+
+                let _ = tokio::join!(task_a, task_b);
+            }
+        }
     }
 
     pub async fn setup_midi_input(&mut self, shared_state: Arc<RwLock<SharedState>>) -> Result<()> {
@@ -131,4 +177,26 @@ async fn handle_midi_message(message: Vec<u8>, shared_state: &Arc<RwLock<SharedS
             state.quarter_notes += 1;
         }
     }
+}
+
+pub async fn play_note(
+    conn: Arc<Mutex<MidiOutputConnection>>,
+    note: u8,
+    duration: u64,
+    velocity: u8,
+    channel: u8,
+) {
+    let mut output = conn.lock().await;
+    output
+        .send(&[NOTE_ON_MSG, note, velocity, channel])
+        .expect("Failed to send NOTE_ON_MSG");
+    drop(output);
+
+    sleep(Duration::from_millis(duration)).await;
+
+    let mut output = conn.lock().await;
+    output
+        .send(&[NOTE_OFF_MSG, note, velocity, channel])
+        .expect("Failed to send NOTE_OFF_MSG");
+    drop(output);
 }

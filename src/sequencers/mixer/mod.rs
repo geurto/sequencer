@@ -1,9 +1,12 @@
 pub mod gui;
 pub mod state;
 
-use crate::{note::Sequence, MixerState, SharedState};
+use crate::{
+    note::{MixedSequence, Sequence},
+    MixerState, SharedState,
+};
 use log::{debug, error, info};
-use num::integer;
+use num::{abs, integer};
 use rand::random;
 use std::{cmp::max, sync::Arc};
 use tokio::sync::{mpsc, RwLock};
@@ -12,13 +15,13 @@ pub struct Mixer {
     shared_state: Arc<RwLock<SharedState>>,
     rx_sequence: mpsc::Receiver<(Option<Sequence>, Option<Sequence>)>,
     sequences: (Sequence, Sequence),
-    tx_mixed_sequence: mpsc::Sender<Sequence>,
+    tx_mixed_sequence: mpsc::Sender<MixedSequence>,
 }
 
 impl Mixer {
     pub fn new(
         shared_state: Arc<RwLock<SharedState>>,
-        tx_mixed_sequence: mpsc::Sender<Sequence>,
+        tx_mixed_sequence: mpsc::Sender<MixedSequence>,
         rx_sequence: mpsc::Receiver<(Option<Sequence>, Option<Sequence>)>,
     ) -> Self {
         Mixer {
@@ -73,21 +76,23 @@ impl Mixer {
             integer::lcm(len_a, len_b)
         };
 
-        let mut mixed_sequence = Sequence::empty();
-        for i in 0..sequence_length - 1 {
+        let mut mixed_sequence = MixedSequence::new();
+        for i in 0..sequence_length {
             let note_a = self.sequences.0.notes[i % len_a];
             let note_b = self.sequences.1.notes[i % len_b];
             let mixed_note = match (note_a.pitch, note_b.pitch) {
-                (0, 0) => note_a,
-                (_, 0) => note_a,
-                (0, _) => note_b,
+                (0, 0) => (Some(note_a), Some(note_b)),
+                (_, 0) => (Some(note_a), None),
+                (0, _) => (None, Some(note_b)),
                 (_, _) => {
                     let mixer_ratio = self.shared_state.read().await.mixer_state.ratio;
                     let r = random::<f32>();
-                    if r >= mixer_ratio {
-                        note_b
+                    if abs(r - mixer_ratio) < 0.15 {
+                        (Some(note_a), Some(note_b))
+                    } else if r > mixer_ratio {
+                        (None, Some(note_b))
                     } else {
-                        note_a
+                        (Some(note_a), None)
                     }
                 }
             };
