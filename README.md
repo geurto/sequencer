@@ -65,6 +65,6 @@ The common keyboard shortcuts are:
 - `F` to decrease mixer ratio by 0.05
 
 ## Roadmap
-[ ] Add chords
-[ ] Add scales
-[ ] Add +AI sequencer 
+- [ ] Add chords
+- [ ] Add scales
+- [ ] Add +AI sequencer 
