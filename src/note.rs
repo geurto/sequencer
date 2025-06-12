@@ -53,13 +53,25 @@ impl Sequence {
         Sequence { notes: vec![] }
     }
 
-    fn midi_to_note_name(pitch: u8) -> String {
+    pub fn midi_to_note_name(pitch: u8) -> String {
         let note_names = [
-            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+            "C.",
+            "C#. / Db.",
+            "D.",
+            "D#. / Eb.",
+            "E.",
+            "F.",
+            "F#. / Gb.",
+            "G.",
+            "G#. / Ab.",
+            "A.",
+            "A#. / Bb.",
+            "B.",
         ];
-        let octave = (pitch / 12) as i8 - 1;
-        let note = note_names[(pitch % 12) as usize];
-        format!("[{}{}]", note, octave)
+        let octave = ((pitch - 12) as f32 / 12.).floor();
+        let note = note_names[((pitch - 12) % 12) as usize];
+
+        note.replace(".", &format!("{}", octave))
     }
 
     fn duration_to_symbol(duration: f32, total_duration: f32) -> String {
@@ -79,7 +91,7 @@ impl Debug for Sequence {
             let note_name = if note.pitch == 0 {
                 "[r]".to_string()
             } else {
-                Sequence::midi_to_note_name(note.pitch)
+                format!("[{}]", Sequence::midi_to_note_name(note.pitch))
             };
             let duration_symbol = Sequence::duration_to_symbol(note.duration, total_duration);
             result.push_str(&format!("{}{}", note_name, duration_symbol));
@@ -124,5 +136,22 @@ impl Default for MixedSequence {
             16
         ];
         MixedSequence { notes }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pitch_to_note() {
+        assert_eq!(Sequence::midi_to_note_name(21), "A0");
+        assert_eq!(Sequence::midi_to_note_name(26), "D1");
+        assert_eq!(Sequence::midi_to_note_name(27), "D#1 / Eb1");
+        assert_eq!(Sequence::midi_to_note_name(33), "A1");
+        assert_eq!(Sequence::midi_to_note_name(60), "C4");
+        assert_eq!(Sequence::midi_to_note_name(69), "A4");
+        assert_eq!(Sequence::midi_to_note_name(96), "C7");
+        assert_eq!(Sequence::midi_to_note_name(127), "G9");
     }
 }
