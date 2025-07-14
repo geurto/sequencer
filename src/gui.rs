@@ -1,4 +1,5 @@
 use crate::{
+    midi::gui::{Gui as MidiGui, Message as MidiGuiMessage},
     sequencers::{
         euclidean::gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage},
         mixer::gui::{Gui as MixerGui, Message as MixerGuiMessage},
@@ -23,6 +24,7 @@ pub enum Message {
     LeftSequencer(EuclideanGuiMessage),
     RightSequencer(EuclideanGuiMessage),
     Mixer(MixerGuiMessage),
+    MidiConnection(MidiGuiMessage),
 }
 
 pub struct CustomTheme {
@@ -80,6 +82,7 @@ pub struct Gui {
     sequencer_left: EuclideanGui,
     sequencer_right: EuclideanGui,
     mixer: MixerGui,
+    midi: MidiGui,
     theme: CustomTheme,
 }
 
@@ -89,6 +92,7 @@ impl Gui {
         sequencer_left: EuclideanGui,
         sequencer_right: EuclideanGui,
         mixer: MixerGui,
+        midi: MidiGui,
     ) -> Self {
         Self {
             tx_gui,
@@ -96,6 +100,7 @@ impl Gui {
             sequencer_left,
             sequencer_right,
             mixer,
+            midi,
             theme: CustomTheme::default(),
         }
     }
@@ -132,6 +137,12 @@ impl Gui {
             }
             Message::Mixer(state) => {
                 info!("Mixer message in Main GUI update: {:?}", state)
+            }
+            Message::MidiConnection(connection) => {
+                info!(
+                    "MIDI connection message in Main GUI update: {:?}",
+                    connection
+                )
             }
         }
 
@@ -195,6 +206,7 @@ impl Gui {
         sequencer_left: EuclideanGui,
         sequencer_right: EuclideanGui,
         mixer: MixerGui,
+        midi: MidiGui,
     ) -> iced::Result {
         iced::application("Sequencer", Gui::update, Gui::view)
             .subscription(|gui| gui.subscription())
@@ -203,7 +215,7 @@ impl Gui {
             .centered()
             .run_with(|| {
                 (
-                    Self::new(tx_gui, sequencer_left, sequencer_right, mixer),
+                    Self::new(tx_gui, sequencer_left, sequencer_right, mixer, midi),
                     Task::none(),
                 )
             })
@@ -239,6 +251,9 @@ fn poll() -> impl Stream<Item = Event> {
                 }
                 Message::Mixer(msg) => {
                     info!("Received Message::Mixer: {:?}", msg)
+                }
+                Message::MidiConnection(msg) => {
+                    info!("Received Message::MidiConnection: {:?}", msg)
                 }
             };
         }

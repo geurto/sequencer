@@ -1,3 +1,5 @@
+pub mod gui;
+
 use crate::note::Note;
 use crate::state::SharedState;
 
@@ -20,7 +22,7 @@ const NOTE_OFF_MSG: u8 = 0x80;
 
 impl MidiHandler {
     pub fn new() -> Result<Self> {
-        let midi_out = MidiOutput::new("My MIDI Output")?;
+        let midi_out = MidiOutput::new("Generative Sequencer MIDI Out")?;
         let out_ports = midi_out.ports();
 
         info!("Available output ports:");

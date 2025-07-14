@@ -64,6 +64,12 @@ The common keyboard shortcuts are:
 - `R` to increase mixer ratio by 0.05
 - `F` to decrease mixer ratio by 0.05
 
+## Try it out with FluidSynth
+An easy way (on Linux) to get a feel for this sequencer is to attach it to a FluidSynth instance.
+
+### Get a SoundFont file
+Next, you'll need to download a .sf2 SoundFont file, such as here: [Roland SC-88 SoundFont file](https://musical-artifacts.com/artifacts/538)
+
 ## Roadmap
 - [ ] Add chords
 - [ ] Add scales
