@@ -166,6 +166,10 @@ impl Gui {
             .width(Length::Fill)
             .height(Length::Fill);
 
+        let midi_content = Container::new(self.midi.view().map(Message::MidiConnection))
+            .width(Length::Fill)
+            .height(Length::Fill);
+
         let help_text_content = column![
             text("Controls")
                 .color(self.theme.primary_text_color)
@@ -191,9 +195,14 @@ impl Gui {
             vertical_space().height(80)
         ];
 
-        let content = column![sequencer_content, mixer_content, help_text_content]
-            .align_x(Center)
-            .spacing(20);
+        let content = column![
+            sequencer_content,
+            mixer_content,
+            midi_content,
+            help_text_content
+        ]
+        .align_x(Center)
+        .spacing(20);
 
         container(content)
             .width(Length::Fill)

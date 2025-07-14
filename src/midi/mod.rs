@@ -1,4 +1,5 @@
 pub mod gui;
+pub mod state;
 
 use crate::note::Note;
 use crate::state::SharedState;

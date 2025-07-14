@@ -10,6 +10,7 @@ use tokio::sync::{mpsc, RwLock};
 
 use sequencer::{
     gui::Message,
+    midi::gui::Gui as MidiGui,
     note::MixedSequence,
     run_input_handler,
     sequencers::{euclidean::gui::Gui as EuclideanGui, mixer::gui::Gui as MixerGui},
@@ -81,12 +82,14 @@ async fn main() -> Result<()> {
     let gui_sequencer_left = EuclideanGui::new(SequencerSlot::Left);
     let gui_sequencer_right = EuclideanGui::new(SequencerSlot::Right);
     let gui_mixer = MixerGui::new();
+    let gui_midi = MidiGui::new();
 
     Gui::run(
         tx_gui.clone(),
         gui_sequencer_left,
         gui_sequencer_right,
         gui_mixer,
+        gui_midi,
     )?;
 
     // Shutdown

@@ -1,11 +1,20 @@
-use iced::widget::pick_list;
+use iced::{
+    border::Radius,
+    widget::{
+        button,
+        button::{Status, Style},
+        column, container, pick_list, row, text,
+    },
+    Alignment::Center,
+    Background, Border, Element, Length, Shadow, Subscription,
+};
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use crate::{gui::CustomTheme, MidiHandler};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Message {
     RefreshPorts,
     PortsLoaded(Result<Vec<String>, String>),
@@ -16,8 +25,6 @@ pub enum Message {
 pub struct Gui {
     midi_out_ports: Vec<String>,
     selected_midi_port: Option<String>,
-    pick_list_state: pick_list::Status,
-    error_message: Option<String>,
     theme: CustomTheme,
 }
 
@@ -26,8 +33,6 @@ impl Gui {
         Self {
             midi_out_ports: vec!["".to_string()],
             selected_midi_port: None,
-            pick_list_state: pick_list::Status::Active,
-            error_message: None,
             theme: CustomTheme::default(),
         }
     }
@@ -38,63 +43,56 @@ impl Gui {
 
     pub fn update(&mut self, message: Message) {
         match message {
-            Message::RefreshPorts => {
-                self.state = new_state;
-            }
-            Message::RatioChanged(ratio) => {
-                info!("Received new RatioChanged ratio: {:?}", ratio);
-                self.state.ratio = ratio;
-            }
+            Message::RefreshPorts => {}
+            Message::PortsLoaded(res) => {}
+            Message::PortSelected(port) => {}
+            Message::ErrorOccurred(err) => {}
         }
     }
 
     pub fn view(&self) -> Element<Message> {
-        let theme = &self.theme;
-        let slider = iced::widget::slider(0.0..=1.0, self.state.ratio, Message::RatioChanged)
-            .style(move |_: &iced::Theme, status: Status| {
-                let handle_color = match status {
-                    Status::Hovered => theme.accent_color,
-                    Status::Dragged => theme.primary_color,
-                    Status::Active => theme.primary_color_muted,
-                };
+        let dropdown = pick_list(
+            self.midi_out_ports.clone(),
+            self.selected_midi_port.clone(),
+            Message::PortSelected,
+        )
+        .placeholder("Select MIDI output interface");
 
-                let rail_backgrounds = match status {
-                    Status::Hovered => (
-                        Background::Color(theme.primary_color_muted),
-                        Background::Color(theme.surface_color),
-                    ),
-                    _ => (
-                        Background::Color(theme.overlay_color),
-                        Background::Color(theme.surface_color),
-                    ),
+        let theme = &self.theme;
+        let button = button("⟳")
+            .on_press(Message::RefreshPorts)
+            .height(25)
+            .width(25)
+            .style(move |_: &iced::Theme, status: Status| {
+                let button_color = match status {
+                    Status::Hovered => theme.accent_color,
+                    Status::Pressed => theme.primary_color,
+                    Status::Active => theme.primary_color_muted,
+                    Status::Disabled => theme.text_color,
                 };
 
                 Style {
-                    rail: Rail {
-                        backgrounds: rail_backgrounds,
-                        width: 5.,
-                        border: Border {
-                            color: theme.accent_color_muted,
-                            width: 2.,
-                            radius: Radius::default(),
+                    background: Some(Background::Color(button_color)),
+                    text_color: self.theme.primary_text_color,
+                    border: Border {
+                        color: button_color,
+                        width: 2.,
+                        radius: Radius {
+                            top_left: 4.,
+                            top_right: 4.,
+                            bottom_left: 4.,
+                            bottom_right: 4.,
                         },
                     },
-                    handle: Handle {
-                        shape: slider::HandleShape::Rectangle {
-                            width: 10,
-                            border_radius: Radius::default(),
-                        },
-                        background: Background::Color(handle_color),
-                        border_width: 2.,
-                        border_color: theme.accent_color,
-                    },
+                    shadow: Shadow::default(),
                 }
             });
+
         let content = column![
             text("Mixer")
                 .color(self.theme.primary_text_color)
                 .font(self.theme.bold_font),
-            slider,
+            row![dropdown, button].spacing(10)
         ]
         .align_x(Center)
         .spacing(20);
@@ -106,11 +104,4 @@ impl Gui {
             .align_y(Center)
             .into()
     }
-}
-
-impl Default for Gui {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 }
