@@ -7,13 +7,15 @@ use crate::state::SharedState;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
+use state::MidiCommand;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task;
 use tokio::time::{sleep, Duration};
 
 pub struct MidiHandler {
+    rx: mpsc::Receiver<MidiCommand>,
     conn_out: Arc<Mutex<MidiOutputConnection>>,
     conn_in: Option<MidiInputConnection<()>>,
 }
@@ -22,7 +24,7 @@ const NOTE_ON_MSG: u8 = 0x90;
 const NOTE_OFF_MSG: u8 = 0x80;
 
 impl MidiHandler {
-    pub fn new() -> Result<Self> {
+    pub fn new(rx: mpsc::Receiver<MidiCommand>) -> Result<Self> {
         let midi_out = MidiOutput::new("Generative Sequencer MIDI Out")?;
         let out_ports = midi_out.ports();
 
@@ -52,6 +54,7 @@ impl MidiHandler {
             .map_err(|e| anyhow!("Failed to connect to MIDI output: {}", e))?;
 
         Ok(Self {
+            rx,
             conn_out: Arc::new(Mutex::new(conn_out)),
             conn_in: None,
         })
@@ -168,6 +171,8 @@ impl MidiHandler {
         self.conn_in = Some(conn_in);
         Ok(())
     }
+
+    pub async fn run(&mut self) {}
 }
 
 async fn handle_midi_message(message: Vec<u8>, shared_state: &Arc<RwLock<SharedState>>) {

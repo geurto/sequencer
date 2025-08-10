@@ -71,7 +71,7 @@ impl Sequence {
         let octave = ((pitch - 12) as f32 / 12.).floor();
         let note = note_names[((pitch - 12) % 12) as usize];
 
-        note.replace(".", &format!("{}", octave))
+        note.replace(".", &format!("{octave}"))
     }
 
     fn duration_to_symbol(duration: f32, total_duration: f32) -> String {
@@ -94,7 +94,7 @@ impl Debug for Sequence {
                 format!("[{}]", Sequence::midi_to_note_name(note.pitch))
             };
             let duration_symbol = Sequence::duration_to_symbol(note.duration, total_duration);
-            result.push_str(&format!("{}{}", note_name, duration_symbol));
+            result.push_str(&format!("{note_name}{duration_symbol}"));
         }
 
         result.fmt(f)

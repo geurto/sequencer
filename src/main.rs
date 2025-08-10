@@ -10,7 +10,7 @@ use tokio::sync::{mpsc, RwLock};
 
 use sequencer::{
     gui::Message,
-    midi::gui::Gui as MidiGui,
+    midi::{gui::Gui as MidiGui, state::MidiCommand},
     note::MixedSequence,
     run_input_handler,
     sequencers::{euclidean::gui::Gui as EuclideanGui, mixer::gui::Gui as MixerGui},
@@ -31,6 +31,9 @@ async fn main() -> Result<()> {
 
     // final sequence for playback - Sequence
     let (tx_mixed_sequence, rx_mixed_sequence) = mpsc::channel::<MixedSequence>(1);
+
+    // MIDI messages, either GUI or playing a note
+    let (tx_midi, rx_midi) = mpsc::channel::<MidiCommand>(1);
 
     let shared_state: Arc<RwLock<SharedState>> = Arc::new(RwLock::new(SharedState::new(120.)));
 
@@ -68,10 +71,13 @@ async fn main() -> Result<()> {
     tokio::spawn(async move { run_input_handler(rx_keys, tx_gui_input, shared_state_input).await });
 
     // Playback
-    let midi_handler = MidiHandler::new()?;
+    let mut midi_handler = MidiHandler::new(rx_midi)?;
+    tokio::spawn(async move {
+        midi_handler.run().await;
+    });
     let tx_gui_playback = tx_gui.clone();
     let mut playback_handler = PlaybackHandler::new(
-        midi_handler,
+        tx_midi.clone(),
         rx_mixed_sequence,
         tx_gui_playback,
         shared_state.clone(),
@@ -82,7 +88,7 @@ async fn main() -> Result<()> {
     let gui_sequencer_left = EuclideanGui::new(SequencerSlot::Left);
     let gui_sequencer_right = EuclideanGui::new(SequencerSlot::Right);
     let gui_mixer = MixerGui::new();
-    let gui_midi = MidiGui::new();
+    let gui_midi = MidiGui::new(tx_midi);
 
     Gui::run(
         tx_gui.clone(),

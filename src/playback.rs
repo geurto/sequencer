@@ -1,16 +1,20 @@
 use anyhow::Result;
 use log::{debug, error, info};
 use std::sync::{Arc, Mutex as SyncMutex};
-use tokio::sync::{mpsc, RwLock};
-use tokio::time::{sleep, Duration};
+use tokio::{
+    sync::{mpsc, RwLock},
+    time::{sleep, Duration},
+};
 
-use crate::gui::{Event, Message};
-use crate::midi::MidiHandler;
 use crate::note::MixedSequence;
 use crate::state::*;
+use crate::{
+    gui::{Event, Message},
+    midi::state::MidiCommand,
+};
 
 pub struct PlaybackHandler {
-    midi_handler: MidiHandler,
+    tx_midi: mpsc::Sender<MidiCommand>,
     rx_sequence: mpsc::Receiver<MixedSequence>,
     tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,
     shared_state: Arc<RwLock<SharedState>>,
@@ -18,13 +22,13 @@ pub struct PlaybackHandler {
 
 impl PlaybackHandler {
     pub fn new(
-        midi_handler: MidiHandler,
+        tx_midi: mpsc::Sender<MidiCommand>,
         rx_sequence: mpsc::Receiver<MixedSequence>,
         tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,
         shared_state: Arc<RwLock<SharedState>>,
     ) -> Self {
         Self {
-            midi_handler,
+            tx_midi,
             rx_sequence,
             tx_gui,
             shared_state,
@@ -70,8 +74,11 @@ impl PlaybackHandler {
                     sequence.notes.len()
                 );
 
-                self.midi_handler
-                    .play_multiple_notes(note, midi_channel_for_note)
+                self.tx_midi
+                    .send(MidiCommand::PlayNotes {
+                        notes: (note),
+                        channel: midi_channel_for_note,
+                    })
                     .await;
 
                 // Move to the next note

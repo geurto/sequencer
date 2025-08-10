@@ -9,10 +9,11 @@ use iced::{
     Background, Border, Element, Length, Shadow, Subscription,
 };
 
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::mpsc::Sender;
 
-use crate::{gui::CustomTheme, MidiHandler};
+use crate::gui::CustomTheme;
+
+use super::state::MidiCommand;
 
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -23,14 +24,16 @@ pub enum Message {
 }
 
 pub struct Gui {
+    tx: Sender<MidiCommand>,
     midi_out_ports: Vec<String>,
     selected_midi_port: Option<String>,
     theme: CustomTheme,
 }
 
 impl Gui {
-    pub fn new() -> Self {
+    pub fn new(tx: Sender<MidiCommand>) -> Self {
         Self {
+            tx,
             midi_out_ports: vec!["".to_string()],
             selected_midi_port: None,
             theme: CustomTheme::default(),
