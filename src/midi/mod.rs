@@ -16,7 +16,7 @@ use tokio::time::{sleep, Duration};
 
 pub struct MidiHandler {
     rx: mpsc::Receiver<MidiCommand>,
-    conn_out: Arc<Mutex<MidiOutputConnection>>,
+    conn_out: Arc<Mutex<Option<MidiOutputConnection>>>,
     conn_in: Option<MidiInputConnection<()>>,
 }
 
@@ -25,37 +25,9 @@ const NOTE_OFF_MSG: u8 = 0x80;
 
 impl MidiHandler {
     pub fn new(rx: mpsc::Receiver<MidiCommand>) -> Result<Self> {
-        let midi_out = MidiOutput::new("Generative Sequencer MIDI Out")?;
-        let out_ports = midi_out.ports();
-
-        info!("Available output ports:");
-        for (i, p) in out_ports.iter().enumerate() {
-            info!("{}: {}", i, midi_out.port_name(p)?);
-        }
-
-        let out_ports_ttymidi = out_ports
-            .iter()
-            .filter(|p| midi_out.port_name(p).unwrap().contains("ttymidi"))
-            .collect::<Vec<_>>();
-        let out_port = if out_ports_ttymidi.is_empty() {
-            warn!("No ttymidi output ports available.");
-            out_ports
-                .first()
-                .ok_or_else(|| anyhow!("No MIDI output ports available"))?
-        } else {
-            out_ports_ttymidi
-                .first()
-                .ok_or_else(|| anyhow!("No ttymidi output ports available"))?
-        };
-
-        info!("Connecting to {}", midi_out.port_name(out_port)?);
-        let conn_out = midi_out
-            .connect(out_port, "gen-seq")
-            .map_err(|e| anyhow!("Failed to connect to MIDI output: {}", e))?;
-
         Ok(Self {
             rx,
-            conn_out: Arc::new(Mutex::new(conn_out)),
+            conn_out: Arc::new(Mutex::new(None)),
             conn_in: None,
         })
     }
@@ -172,7 +144,31 @@ impl MidiHandler {
         Ok(())
     }
 
-    pub async fn run(&mut self) {}
+    pub async fn run(&mut self) -> Result<()> {
+        while let Some(midi_command) = self.rx.recv().await {
+            match midi_command {
+                MidiCommand::PlayNotes { notes, channel } => {
+                    self.play_multiple_notes(notes, channel).await
+                }
+                MidiCommand::GetPorts { responder } => {
+                    let midi_out = MidiOutput::new("Generative Sequencer MIDI Out")?;
+                    if responder.send(midi_out.ports()).is_err() {
+                        warn!("Unable to send MIDI output ports.");
+                    }
+                }
+                MidiCommand::SetPort { out_port } => {
+                    let midi_out = MidiOutput::new("Generative Sequencer MIDI Out")?;
+                    let conn_out = midi_out
+                        .connect(&out_port, "gen-seq")
+                        .map_err(|e| anyhow!("Failed to connect to MIDI output: {}", e))?;
+
+                    *self.conn_out.lock().await = Some(conn_out);
+                }
+            };
+        }
+
+        Ok(())
+    }
 }
 
 async fn handle_midi_message(message: Vec<u8>, shared_state: &Arc<RwLock<SharedState>>) {
@@ -188,23 +184,27 @@ async fn handle_midi_message(message: Vec<u8>, shared_state: &Arc<RwLock<SharedS
 }
 
 pub async fn play_note(
-    conn: Arc<Mutex<MidiOutputConnection>>,
+    conn: Arc<Mutex<Option<MidiOutputConnection>>>,
     note: u8,
     duration: u64,
     velocity: u8,
     channel: u8,
 ) {
-    let mut output = conn.lock().await;
-    output
-        .send(&[NOTE_ON_MSG, note, velocity, channel])
-        .expect("Failed to send NOTE_ON_MSG");
-    drop(output);
+    let mut guard = conn.lock().await;
+
+    if let Some(output) = guard.as_mut() {
+        output
+            .send(&[NOTE_ON_MSG, note, velocity, channel])
+            .expect("Failed to send NOTE_ON_MSG");
+    }
 
     sleep(Duration::from_millis(duration)).await;
 
-    let mut output = conn.lock().await;
-    output
-        .send(&[NOTE_OFF_MSG, note, velocity, channel])
-        .expect("Failed to send NOTE_OFF_MSG");
-    drop(output);
+    if let Some(output) = guard.as_mut() {
+        output
+            .send(&[NOTE_OFF_MSG, note, velocity, channel])
+            .expect("Failed to send NOTE_OFF_MSG");
+    }
+
+    drop(guard);
 }

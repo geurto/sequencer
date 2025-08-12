@@ -1,3 +1,4 @@
+use midir::{MidiOutputPort, MidiOutputPorts};
 use tokio::sync::oneshot;
 
 use crate::note::Note;
@@ -10,9 +11,9 @@ pub enum MidiCommand {
         channel: u8,
     },
     GetPorts {
-        responder: oneshot::Sender<Vec<String>>,
+        responder: oneshot::Sender<MidiOutputPorts>,
     },
     SetPort {
-        port_index: usize,
+        out_port: MidiOutputPort,
     },
 }

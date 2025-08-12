@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
     // Playback
     let mut midi_handler = MidiHandler::new(rx_midi)?;
     tokio::spawn(async move {
-        midi_handler.run().await;
+        let _ = midi_handler.run().await;
     });
     let tx_gui_playback = tx_gui.clone();
     let mut playback_handler = PlaybackHandler::new(

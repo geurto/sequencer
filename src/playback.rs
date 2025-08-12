@@ -79,7 +79,7 @@ impl PlaybackHandler {
                         notes: (note),
                         channel: midi_channel_for_note,
                     })
-                    .await;
+                    .await?;
 
                 // Move to the next note
                 current_note_index = (current_note_index + 1) % sequence.notes.len();
