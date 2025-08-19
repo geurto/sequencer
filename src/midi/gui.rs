@@ -6,10 +6,11 @@ use iced::{
         column, container, pick_list, row, text,
     },
     Alignment::Center,
-    Background, Border, Element, Length, Shadow, Subscription,
+    Background, Border, Element, Length, Shadow, Subscription, Task,
 };
 
-use tokio::sync::mpsc::Sender;
+use log::{info, warn};
+use tokio::sync::{mpsc::Sender, oneshot};
 
 use crate::gui::CustomTheme;
 
@@ -44,12 +45,51 @@ impl Gui {
         Subscription::none()
     }
 
-    pub fn update(&mut self, message: Message) {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::RefreshPorts => {}
-            Message::PortsLoaded(res) => {}
-            Message::PortSelected(port) => {}
-            Message::ErrorOccurred(err) => {}
+            Message::RefreshPorts => {
+                info!("Sending GetPorts");
+                let tx_midi = self.tx.clone();
+
+                Task::perform(
+                    async move {
+                        let (tx_oneshot, rx_oneshot) = oneshot::channel();
+                        if let Err(e) = tx_midi
+                            .send(MidiCommand::GetPorts {
+                                responder: tx_oneshot,
+                            })
+                            .await
+                        {
+                            warn!("Could not send ports oneshot to GUI: {e}");
+                            return Message::ErrorOccurred(format!(
+                                "Could not send message to MIDI handler: {e}"
+                            ));
+                        }
+
+                        match rx_oneshot.await {
+                            Ok(ports) => Message::PortsLoaded(Ok(ports)),
+                            Err(e) => {
+                                warn!("Error receiving ports from oneshot: {e}");
+                                Message::PortsLoaded(Err(format!("Oneshot receive error: {e}")))
+                            }
+                        }
+                    },
+                    |msg| msg,
+                )
+            }
+            Message::PortsLoaded(result) => {
+                match result {
+                    Ok(ports) => {
+                        self.midi_out_ports = ports;
+                        info!("Successfully received new ports: {:?}", self.midi_out_ports);
+                    }
+                    Err(e) => {
+                        warn!("Failed to load ports: {}", e);
+                    }
+                }
+                Task::none()
+            }
+            _ => Task::none(),
         }
     }
 

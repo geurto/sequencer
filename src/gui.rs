@@ -142,7 +142,8 @@ impl Gui {
                 info!(
                     "MIDI connection message in Main GUI update: {:?}",
                     connection
-                )
+                );
+                self.midi.update(connection);
             }
         }
 

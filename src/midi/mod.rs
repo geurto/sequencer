@@ -152,7 +152,12 @@ impl MidiHandler {
                 }
                 MidiCommand::GetPorts { responder } => {
                     let midi_out = MidiOutput::new("Generative Sequencer MIDI Out")?;
-                    if responder.send(midi_out.ports()).is_err() {
+                    let port_names = midi_out
+                        .ports()
+                        .iter()
+                        .map(|p| midi_out.port_name(p).unwrap_or_default())
+                        .collect::<Vec<_>>();
+                    if responder.send(port_names).is_err() {
                         warn!("Unable to send MIDI output ports.");
                     }
                 }
