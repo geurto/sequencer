@@ -1,30 +1,41 @@
 use crate::{
-    midi::gui::{Gui as MidiGui, Message as MidiGuiMessage},
-    sequencers::{
-        euclidean::gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage},
-        mixer::gui::{Gui as MixerGui, Message as MixerGuiMessage},
-    },
+    midi::state::MidiCommand,
+    sequencers::euclidean::gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage},
     SharedState,
 };
 use iced::{
+    border::Radius,
     color,
     futures::{channel::mpsc, SinkExt, Stream},
     stream,
-    widget::{column, container, row, text, vertical_space, Container},
+    widget::{
+        button,
+        button::{Status as ButtonStatus, Style as ButtonStyle},
+        column, container, pick_list, row, text,
+    },
+    widget::{
+        slider::{self, Handle, Rail, Status as SliderStatus, Style as SliderStyle},
+        vertical_space, Container,
+    },
     Alignment::{Center, Start},
-    Color, Element, Font, Length, Subscription, Task, Theme,
+    Background, Border, Color, Element, Font, Length, Shadow, Subscription, Task, Theme,
 };
 use iced_futures::core::font;
-use log::{error, info};
+use log::{error, info, warn};
 use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc::Sender, oneshot};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Message {
     ReceivedEvent(Event),
     LeftSequencer(EuclideanGuiMessage),
     RightSequencer(EuclideanGuiMessage),
-    Mixer(MixerGuiMessage),
-    MidiConnection(MidiGuiMessage),
+    MixerRatioChanged(f32),
+    RefreshMidiPorts,
+    MidiPortsLoaded(Result<Vec<String>, String>),
+    MidiPortSelected(String),
+    MidiPortSet(String),
+    ErrorOccurred(String),
 }
 
 pub struct CustomTheme {
@@ -78,29 +89,32 @@ impl Default for CustomTheme {
 
 pub struct Gui {
     tx_gui: Arc<Mutex<Option<mpsc::Sender<Message>>>>,
+    tx_midi: Sender<MidiCommand>,
     cached_state: Option<SharedState>,
     sequencer_left: EuclideanGui,
     sequencer_right: EuclideanGui,
-    mixer: MixerGui,
-    midi: MidiGui,
+    mixer_ratio: f32,
+    midi_out_ports: Vec<String>,
+    selected_midi_port: Option<String>,
     theme: CustomTheme,
 }
 
 impl Gui {
     fn new(
         tx_gui: Arc<Mutex<Option<mpsc::Sender<Message>>>>,
+        tx_midi: Sender<MidiCommand>,
         sequencer_left: EuclideanGui,
         sequencer_right: EuclideanGui,
-        mixer: MixerGui,
-        midi: MidiGui,
     ) -> Self {
         Self {
             tx_gui,
+            tx_midi,
             cached_state: None,
             sequencer_left,
             sequencer_right,
-            mixer,
-            midi,
+            mixer_ratio: 0.5,
+            midi_out_ports: vec!["".to_string()],
+            selected_midi_port: None,
             theme: CustomTheme::default(),
         }
     }
@@ -125,8 +139,7 @@ impl Gui {
                         .update(EuclideanGuiMessage::FromApp(state.clone()));
                     self.sequencer_right
                         .update(EuclideanGuiMessage::FromApp(state.clone()));
-                    self.mixer
-                        .update(MixerGuiMessage::FromApp(state.mixer_state));
+                    self.mixer_ratio = state.mixer_state.ratio;
                 }
             },
             Message::LeftSequencer(state) => {
@@ -135,15 +148,71 @@ impl Gui {
             Message::RightSequencer(state) => {
                 info!("Right sequencer message in Main GUI update: {:?}", state)
             }
-            Message::Mixer(state) => {
-                info!("Mixer message in Main GUI update: {:?}", state)
+            Message::MixerRatioChanged(ratio) => {
+                self.mixer_ratio = ratio;
             }
-            Message::MidiConnection(connection) => {
-                info!(
-                    "MIDI connection message in Main GUI update: {:?}",
-                    connection
+            Message::RefreshMidiPorts => {
+                info!("Sending GetPorts");
+                let tx_midi = self.tx_midi.clone();
+
+                return Task::perform(
+                    async move {
+                        let (tx_oneshot, rx_oneshot) = oneshot::channel();
+                        if let Err(e) = tx_midi
+                            .send(MidiCommand::GetPorts {
+                                responder: tx_oneshot,
+                            })
+                            .await
+                        {
+                            warn!("Could not send ports oneshot to GUI: {e}");
+                        }
+
+                        match rx_oneshot.await {
+                            Ok(ports) => Message::MidiPortsLoaded(Ok(ports)),
+                            Err(e) => {
+                                Message::MidiPortsLoaded(Err(format!("Oneshot receive error: {e}")))
+                            }
+                        }
+                    },
+                    |msg| msg,
                 );
-                self.midi.update(connection);
+            }
+            Message::MidiPortsLoaded(result) => match result {
+                Ok(ports) => {
+                    self.midi_out_ports = ports;
+                    info!("Successfully received new ports: {:?}", self.midi_out_ports);
+                }
+                Err(e) => {
+                    warn!("Failed to load ports: {}", e);
+                }
+            },
+            Message::MidiPortSelected(port) => {
+                let tx_midi = self.tx_midi.clone();
+                let port_to_set = port.clone();
+
+                return Task::perform(
+                    async move {
+                        info!("Sending SetPort");
+                        match tx_midi
+                            .send(MidiCommand::SetPort {
+                                out_port: port_to_set.clone(),
+                            })
+                            .await
+                        {
+                            Ok(_) => Message::MidiPortSet(port_to_set),
+                            Err(e) => Message::ErrorOccurred(format!(
+                                "Could not send SetPort message: {e}"
+                            )),
+                        }
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::ErrorOccurred(err) => {
+                error!("Received error: {}", err);
+            }
+            Message::MidiPortSet(port) => {
+                self.selected_midi_port = Some(port);
             }
         }
 
@@ -163,11 +232,11 @@ impl Gui {
 
         let sequencer_content = row![sequencer_left_view, sequencer_right_view].spacing(20);
 
-        let mixer_content = Container::new(self.mixer.view().map(Message::Mixer))
+        let mixer_content = Container::new(self.view_mixer())
             .width(Length::Fill)
             .height(Length::Fill);
 
-        let midi_content = Container::new(self.midi.view().map(Message::MidiConnection))
+        let midi_content = Container::new(self.view_midi())
             .width(Length::Fill)
             .height(Length::Fill);
 
@@ -211,12 +280,125 @@ impl Gui {
             .into()
     }
 
+    pub fn view_mixer(&self) -> Element<Message> {
+        let theme = &self.theme;
+        let slider = iced::widget::slider(0.0..=1.0, self.mixer_ratio, Message::MixerRatioChanged)
+            .style(move |_: &iced::Theme, status: SliderStatus| {
+                let handle_color = match status {
+                    SliderStatus::Hovered => theme.accent_color,
+                    SliderStatus::Dragged => theme.primary_color,
+                    SliderStatus::Active => theme.primary_color_muted,
+                };
+
+                let rail_backgrounds = match status {
+                    SliderStatus::Hovered => (
+                        Background::Color(theme.primary_color_muted),
+                        Background::Color(theme.surface_color),
+                    ),
+                    _ => (
+                        Background::Color(theme.overlay_color),
+                        Background::Color(theme.surface_color),
+                    ),
+                };
+
+                SliderStyle {
+                    rail: Rail {
+                        backgrounds: rail_backgrounds,
+                        width: 5.,
+                        border: Border {
+                            color: theme.accent_color_muted,
+                            width: 2.,
+                            radius: Radius::default(),
+                        },
+                    },
+                    handle: Handle {
+                        shape: slider::HandleShape::Rectangle {
+                            width: 10,
+                            border_radius: Radius::default(),
+                        },
+                        background: Background::Color(handle_color),
+                        border_width: 2.,
+                        border_color: theme.accent_color,
+                    },
+                }
+            });
+        let content = column![
+            text("Mixer")
+                .color(self.theme.primary_text_color)
+                .font(self.theme.bold_font),
+            slider,
+        ]
+        .align_x(Center)
+        .spacing(20);
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Center)
+            .align_y(Center)
+            .into()
+    }
+
+    pub fn view_midi(&self) -> Element<Message> {
+        let dropdown = pick_list(
+            self.midi_out_ports.clone(),
+            self.selected_midi_port.clone(),
+            Message::MidiPortSelected,
+        )
+        .placeholder("Select MIDI output interface");
+
+        let theme = &self.theme;
+        let button = button("⟳")
+            .on_press(Message::RefreshMidiPorts)
+            .height(25)
+            .width(25)
+            .style(move |_: &iced::Theme, status: ButtonStatus| {
+                let button_color = match status {
+                    ButtonStatus::Hovered => theme.accent_color,
+                    ButtonStatus::Pressed => theme.primary_color,
+                    ButtonStatus::Active => theme.primary_color_muted,
+                    ButtonStatus::Disabled => theme.text_color,
+                };
+
+                ButtonStyle {
+                    background: Some(Background::Color(button_color)),
+                    text_color: self.theme.primary_text_color,
+                    border: Border {
+                        color: button_color,
+                        width: 2.,
+                        radius: Radius {
+                            top_left: 4.,
+                            top_right: 4.,
+                            bottom_left: 4.,
+                            bottom_right: 4.,
+                        },
+                    },
+                    shadow: Shadow::default(),
+                }
+            });
+
+        let content = column![
+            text("Mixer")
+                .color(self.theme.primary_text_color)
+                .font(self.theme.bold_font),
+            row![dropdown, button].spacing(10)
+        ]
+        .align_x(Center)
+        .spacing(20);
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Center)
+            .align_y(Center)
+            .into()
+    }
+
     pub fn run(
         tx_gui: Arc<Mutex<Option<mpsc::Sender<Message>>>>,
+        tx_midi: Sender<MidiCommand>,
         sequencer_left: EuclideanGui,
         sequencer_right: EuclideanGui,
-        mixer: MixerGui,
-        midi: MidiGui,
     ) -> iced::Result {
         iced::application("Sequencer", Gui::update, Gui::view)
             .subscription(|gui| gui.subscription())
@@ -225,7 +407,7 @@ impl Gui {
             .centered()
             .run_with(|| {
                 (
-                    Self::new(tx_gui, sequencer_left, sequencer_right, mixer, midi),
+                    Self::new(tx_gui, tx_midi, sequencer_left, sequencer_right),
                     Task::none(),
                 )
             })
@@ -250,21 +432,11 @@ fn poll() -> impl Stream<Item = Event> {
         loop {
             use iced_futures::futures::StreamExt;
 
-            match receiver.select_next_some().await {
-                Message::ReceivedEvent(event) => output
+            if let Message::ReceivedEvent(event) = receiver.select_next_some().await {
+                output
                     .send(event)
                     .await
-                    .expect("Failed to send Message::ReceivedEvent"),
-                Message::LeftSequencer(msg) => info!("Received Message::LeftSequencer: {:?}", msg),
-                Message::RightSequencer(msg) => {
-                    info!("Received Message::RightSequencer: {:?}", msg)
-                }
-                Message::Mixer(msg) => {
-                    info!("Received Message::Mixer: {:?}", msg)
-                }
-                Message::MidiConnection(msg) => {
-                    info!("Received Message::MidiConnection: {:?}", msg)
-                }
+                    .expect("Failed to send Message::ReceivedEvent");
             };
         }
     })

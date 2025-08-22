@@ -1,8 +1,8 @@
 use core::fmt;
 use log::info;
 
+use crate::mixer::state::MixerState;
 use crate::sequencers::euclidean::state::EuclideanSequencerState;
-use crate::sequencers::mixer::state::MixerState;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum SequencerSlot {

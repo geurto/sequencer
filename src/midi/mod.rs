@@ -1,11 +1,10 @@
-pub mod gui;
 pub mod state;
 
 use crate::note::Note;
 use crate::state::SharedState;
 
 use anyhow::{anyhow, Context, Result};
-use log::{info, warn};
+use log::{error, info, warn};
 use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use state::MidiCommand;
 use std::sync::Arc;
@@ -152,22 +151,27 @@ impl MidiHandler {
                 }
                 MidiCommand::GetPorts { responder } => {
                     let midi_out = MidiOutput::new("Generative Sequencer MIDI Out")?;
-                    let port_names = midi_out
-                        .ports()
-                        .iter()
-                        .map(|p| midi_out.port_name(p).unwrap_or_default())
-                        .collect::<Vec<_>>();
+                    let port_names = midi_out.ports().iter().map(|p| p.id()).collect::<Vec<_>>();
                     if responder.send(port_names).is_err() {
                         warn!("Unable to send MIDI output ports.");
                     }
                 }
                 MidiCommand::SetPort { out_port } => {
+                    info!("Received SetPort from GUI");
                     let midi_out = MidiOutput::new("Generative Sequencer MIDI Out")?;
-                    let conn_out = midi_out
-                        .connect(&out_port, "gen-seq")
-                        .map_err(|e| anyhow!("Failed to connect to MIDI output: {}", e))?;
+                    match midi_out.find_port_by_id(out_port.clone()) {
+                        Some(midi_port) => {
+                            let conn_out = midi_out
+                                .connect(&midi_port, "gen-seq")
+                                .map_err(|e| anyhow!("Failed to connect to MIDI output: {}", e))?;
 
-                    *self.conn_out.lock().await = Some(conn_out);
+                            *self.conn_out.lock().await = Some(conn_out);
+                            info!("Successfully changed MIDI output port to {out_port}");
+                        }
+                        None => {
+                            error!("Unable to find MIDI output port with name {out_port}")
+                        }
+                    }
                 }
             };
         }

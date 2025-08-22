@@ -8,8 +8,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::gui::{Event, Message};
+use crate::mixer::state::MixerInput;
 use crate::sequencers::euclidean::state::EuclideanSequencerInput;
-use crate::sequencers::mixer::state::MixerInput;
 use crate::state::SharedState;
 
 pub enum Input {
