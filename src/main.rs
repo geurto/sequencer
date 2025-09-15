@@ -4,6 +4,7 @@ use env_logger::Builder;
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex as SyncMutex},
+    thread,
 };
 use tokio::signal;
 use tokio::sync::{mpsc, RwLock};
@@ -77,7 +78,6 @@ async fn main() -> Result<()> {
         tx_gui_playback,
         shared_state.clone(),
     );
-    tokio::spawn(async move { playback_handler.run().await });
 
     // GUI
     let gui_sequencer_left = EuclideanGui::new(SequencerSlot::Left);

@@ -12,7 +12,11 @@ pub use input::{run_input_handler, start_polling};
 pub use midi::MidiHandler;
 pub use mixer::{state::MixerState, Mixer};
 pub use note::Sequence;
-pub use playback::PlaybackHandler;
+pub use playback::{
+    engine::PlaybackEngine,
+    state::{PlaybackCommand, PlaybackStatus},
+    PlaybackHandler,
+};
 pub use sequencers::{
     common::Sequencer,
     euclidean::{state::EuclideanSequencerState, EuclideanSequencer},
