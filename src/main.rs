@@ -3,16 +3,22 @@ use device_query::Keycode;
 use env_logger::Builder;
 use std::{
     collections::HashSet,
-    sync::{Arc, Mutex as SyncMutex},
+    sync::{mpsc::channel as sync_channel, Arc, Mutex as SyncMutex},
     thread,
 };
 use tokio::signal;
 use tokio::sync::{mpsc, RwLock};
 
 use sequencer::{
-    gui::Message, midi::state::MidiCommand, note::MixedSequence, run_input_handler,
-    sequencers::euclidean::gui::Gui as EuclideanGui, start_polling, state::SequencerSlot,
-    EuclideanSequencer, Gui, MidiHandler, Mixer, PlaybackHandler, Sequence, Sequencer, SharedState,
+    gui::Message,
+    midi::{midi_utils, state::MidiCommand},
+    note::MixedSequence,
+    run_input_handler,
+    sequencers::euclidean::gui::Gui as EuclideanGui,
+    start_polling,
+    state::SequencerSlot,
+    EuclideanSequencer, Gui, Mixer, PlaybackCommand, PlaybackEngine, PlaybackHandler, Sequence,
+    Sequencer, SharedState,
 };
 
 #[tokio::main]
@@ -30,6 +36,10 @@ async fn main() -> Result<()> {
 
     // MIDI messages, either GUI or playing a note
     let (tx_midi, rx_midi) = mpsc::channel::<MidiCommand>(1);
+
+    // synchronous playback commands & status
+    let (tx_playback_cmd, rx_playback_cmd) = sync_channel();
+    let (tx_playback_status, rx_playback_status) = sync_channel();
 
     let shared_state: Arc<RwLock<SharedState>> = Arc::new(RwLock::new(SharedState::new(120.)));
 
@@ -67,17 +77,15 @@ async fn main() -> Result<()> {
     tokio::spawn(async move { run_input_handler(rx_keys, tx_gui_input, shared_state_input).await });
 
     // Playback
-    let mut midi_handler = MidiHandler::new(rx_midi)?;
-    tokio::spawn(async move {
-        let _ = midi_handler.run().await;
-    });
+    let midi_ports = midi_utils::list_ports()?;
+    let midi_conn = midi_utils::create_connection(midi_ports[0].clone())?;
+
     let tx_gui_playback = tx_gui.clone();
-    let mut playback_handler = PlaybackHandler::new(
-        tx_midi.clone(),
-        rx_mixed_sequence,
-        tx_gui_playback,
-        shared_state.clone(),
-    );
+    let mut playback_handler = PlaybackHandler::new(rx_midi, tx_gui_playback);
+    let playback_engine = PlaybackEngine::new(rx_playback_cmd, tx_playback_status, midi_conn);
+    thread::spawn(move || {
+        playback_engine.run();
+    });
 
     // GUI
     let gui_sequencer_left = EuclideanGui::new(SequencerSlot::Left);

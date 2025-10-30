@@ -9,7 +9,6 @@ pub mod state;
 
 pub use gui::Gui;
 pub use input::{run_input_handler, start_polling};
-pub use midi::MidiHandler;
 pub use mixer::{state::MixerState, Mixer};
 pub use note::Sequence;
 pub use playback::{

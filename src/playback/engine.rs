@@ -65,6 +65,7 @@ impl PlaybackEngine {
                     }
                     PlaybackCommand::SetMidiChannel(_) => {}
                     PlaybackCommand::SetBPM(bpm) => self.bpm = bpm,
+                    PlaybackCommand::SetOutputConnection(conn) => self.midi_conn = conn,
                 }
             }
 

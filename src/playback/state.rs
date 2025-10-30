@@ -1,3 +1,6 @@
+use midir::MidiOutputConnection;
+use std::fmt;
+
 // MIDI event to send over midir
 #[derive(Debug, Clone, Copy)]
 pub enum MidiEventType {
@@ -27,13 +30,13 @@ pub struct PolyphonicSequence {
 }
 
 // Commands FROM the UI/input TO the playback thread
-#[derive(Debug)]
 pub enum PlaybackCommand {
     Play,
     Stop,
     LoadSequence(PolyphonicSequence),
     SetMidiChannel(u8),
     SetBPM(f64),
+    SetOutputConnection(MidiOutputConnection),
 }
 
 // Data FROM the playback thread TO the UI

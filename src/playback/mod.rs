@@ -2,114 +2,49 @@ pub mod engine;
 pub mod state;
 
 use anyhow::Result;
-use log::{debug, error, info};
+use log::{error, info, warn};
 use std::sync::{Arc, Mutex as SyncMutex};
-use tokio::{
-    sync::{mpsc, RwLock},
-    time::{sleep, Duration},
-};
+use tokio::sync::mpsc;
 
-use crate::note::MixedSequence;
-use crate::state::*;
-use crate::{
-    gui::{Event, Message},
-    midi::state::MidiCommand,
-};
+use crate::{gui::Message, midi::midi_utils, midi::state::MidiCommand};
 
 pub struct PlaybackHandler {
-    tx_midi: mpsc::Sender<MidiCommand>,
-    rx_sequence: mpsc::Receiver<MixedSequence>,
+    rx_midi: mpsc::Receiver<MidiCommand>,
     tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,
-    shared_state: Arc<RwLock<SharedState>>,
 }
 
 impl PlaybackHandler {
     pub fn new(
-        tx_midi: mpsc::Sender<MidiCommand>,
-        rx_sequence: mpsc::Receiver<MixedSequence>,
+        rx_midi: mpsc::Receiver<MidiCommand>,
         tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,
-        shared_state: Arc<RwLock<SharedState>>,
     ) -> Self {
-        Self {
-            tx_midi,
-            rx_sequence,
-            tx_gui,
-            shared_state,
-        }
+        Self { rx_midi, tx_gui }
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        info!("Starting playback loop");
-        let mut current_note_index = 0;
-        let mut sequence = MixedSequence::default();
-
-        loop {
-            if let Ok(seq) = self.rx_sequence.try_recv() {
-                debug!(
-                    "Received new sequence: {:?} of length {}",
-                    seq,
-                    seq.notes.len()
-                );
-                sequence = seq;
-                current_note_index = if sequence.notes.is_empty() {
-                    0
-                } else {
-                    current_note_index % sequence.notes.len()
-                };
-            }
-
-            let (is_playing, midi_channel_for_note) = {
-                let r_state = self.shared_state.read().await;
-                (r_state.playing, r_state.midi_channel)
-            };
-
-            if is_playing {
-                if sequence.notes.is_empty() {
-                    sleep(Duration::from_millis(10)).await;
-                    continue;
-                }
-
-                let note = sequence.notes[current_note_index];
-                debug!(
-                    "Playing note: {:?} at index {}/{}",
-                    note,
-                    current_note_index,
-                    sequence.notes.len()
-                );
-
-                self.tx_midi
-                    .send(MidiCommand::PlayNotes {
-                        notes: (note),
-                        channel: midi_channel_for_note,
-                    })
-                    .await?;
-
-                // Move to the next note
-                current_note_index = (current_note_index + 1) % sequence.notes.len();
-
-                // Quickly update current_note_index
-                {
-                    let mut w_state = self.shared_state.write().await;
-                    w_state.current_note_index = current_note_index;
-                }
-
-                let r_state = self.shared_state.read().await;
-                if let Some(mut tx) = self.tx_gui.lock().unwrap().clone() {
-                    if let Err(e) =
-                        tx.try_send(Message::ReceivedEvent(Event::StateChanged(r_state.clone())))
-                    {
-                        error!(
-                            "Playback: Error sending Message::ReceivedEvent to GUI: {:?}",
-                            e
-                        );
+        while let Some(midi_command) = self.rx_midi.recv().await {
+            match midi_command {
+                MidiCommand::GetPorts { responder } => {
+                    let port_names = midi_utils::list_ports()?;
+                    if responder.send(port_names).is_err() {
+                        warn!("Unable to send MIDI output ports.");
                     }
                 }
-                drop(r_state);
-            } else {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
+                MidiCommand::SetPort { out_port } => {
+                    info!("Received SetPort from GUI");
+                    let conn_out = midi_utils::create_connection(out_port)?;
 
-            tokio::time::sleep(Duration::from_millis(1)).await;
+                    self.tx_conn.send(conn_out);
+
+                    if let Some(mut tx) = self.tx_gui.lock().unwrap().clone() {
+                        if let Err(e) = tx.try_send(Message::MidiPortSet()) {
+                            error!("Error sending Message::MidiPortSet to GUI: {:?}", e);
+                        }
+                    }
+                }
+            };
         }
+
+        Ok(())
     }
 }
