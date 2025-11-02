@@ -1,6 +1,5 @@
 pub mod gui;
 pub mod input;
-pub mod midi;
 pub mod mixer;
 pub mod note;
 pub mod playback;
@@ -13,6 +12,7 @@ pub use mixer::{state::MixerState, Mixer};
 pub use note::Sequence;
 pub use playback::{
     engine::PlaybackEngine,
+    midi::{midi_utils, MidiCommand},
     state::{PlaybackCommand, PlaybackStatus},
     PlaybackHandler,
 };

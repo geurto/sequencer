@@ -1,24 +1,35 @@
 pub mod engine;
+pub mod midi;
 pub mod state;
 
 use anyhow::Result;
 use log::{error, info, warn};
-use std::sync::{Arc, Mutex as SyncMutex};
+use state::PlaybackCommand;
+use std::sync::{mpsc::Sender as SyncSender, Arc, Mutex as SyncMutex};
 use tokio::sync::mpsc;
 
-use crate::{gui::Message, midi::midi_utils, midi::state::MidiCommand};
+use crate::{gui::Message, midi_utils, note::MixedSequence, MidiCommand};
 
 pub struct PlaybackHandler {
     rx_midi: mpsc::Receiver<MidiCommand>,
+    rx_sequence: mpsc::Receiver<MixedSequence>,
+    tx_engine: SyncSender<PlaybackCommand>,
     tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,
 }
 
 impl PlaybackHandler {
     pub fn new(
         rx_midi: mpsc::Receiver<MidiCommand>,
+        rx_sequence: mpsc::Receiver<MixedSequence>,
+        tx_engine: SyncSender<PlaybackCommand>,
         tx_gui: Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,
     ) -> Self {
-        Self { rx_midi, tx_gui }
+        Self {
+            rx_midi,
+            rx_sequence,
+            tx_engine,
+            tx_gui,
+        }
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -32,12 +43,20 @@ impl PlaybackHandler {
                 }
                 MidiCommand::SetPort { out_port } => {
                     info!("Received SetPort from GUI");
-                    let conn_out = midi_utils::create_connection(out_port)?;
+                    let conn_out = midi_utils::create_connection(out_port.clone())?;
 
-                    self.tx_conn.send(conn_out);
+                    match self
+                        .tx_engine
+                        .send(PlaybackCommand::SetOutputConnection(conn_out))
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Error sending MidiOutputConnection to PlaybackEngine: {e}")
+                        }
+                    }
 
                     if let Some(mut tx) = self.tx_gui.lock().unwrap().clone() {
-                        if let Err(e) = tx.try_send(Message::MidiPortSet()) {
+                        if let Err(e) = tx.try_send(Message::MidiPortSet(out_port)) {
                             error!("Error sending Message::MidiPortSet to GUI: {:?}", e);
                         }
                     }

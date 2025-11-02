@@ -1,7 +1,8 @@
 use crate::{
-    midi::state::MidiCommand,
-    sequencers::euclidean::gui::{Gui as EuclideanGui, Message as EuclideanGuiMessage},
-    SharedState,
+    sequencers::euclidean::gui::{
+        Gui as EuclideanGui, Message as EuclideanGuiMessage,
+    },
+    MidiCommand, SharedState,
 };
 use iced::{
     border::Radius,
@@ -14,11 +15,14 @@ use iced::{
         column, container, pick_list, row, text,
     },
     widget::{
-        slider::{self, Handle, Rail, Status as SliderStatus, Style as SliderStyle},
+        slider::{
+            self, Handle, Rail, Status as SliderStatus, Style as SliderStyle,
+        },
         vertical_space, Container,
     },
     Alignment::{Center, Start},
-    Background, Border, Color, Element, Font, Length, Shadow, Subscription, Task, Theme,
+    Background, Border, Color, Element, Font, Length, Shadow, Subscription,
+    Task, Theme,
 };
 use iced_futures::core::font;
 use log::{error, info, warn};
@@ -52,6 +56,8 @@ pub struct CustomTheme {
     pub accent_color_muted: Color,
     pub header_font: Font,
     pub bold_font: Font,
+    pub header_text_size: u16,
+    pub text_size: u16,
 }
 
 impl Default for CustomTheme {
@@ -61,17 +67,17 @@ impl Default for CustomTheme {
             primary_color: color!(0xcba6f7),       // Mauve
             primary_color_muted: color!(0x65537b), // Muted mauve
 
-            secondary_color: color!(0xf5c2e7),       // Pink
+            secondary_color: color!(0xf5c2e7), // Pink
             secondary_color_muted: color!(0x7a6173), // Muted pink
 
-            primary_text_color: color!(0x89b4fa),   // Blue
+            primary_text_color: color!(0x89b4fa), // Blue
             secondary_text_color: color!(0xb4befe), // Lavender
-            text_color: color!(0xcdd6f4),           // Text,
+            text_color: color!(0xcdd6f4),         // Text,
 
             surface_color: color!(0x1e1e2e), // Base
             overlay_color: color!(0x313244), // Surface0
 
-            accent_color: color!(0xb4befe),       // Lavender
+            accent_color: color!(0xb4befe), // Lavender
             accent_color_muted: color!(0x5a5f7f), // Muted lavender
 
             header_font: Font {
@@ -83,6 +89,8 @@ impl Default for CustomTheme {
                 weight: font::Weight::Bold,
                 ..Font::default()
             },
+            header_text_size: 14,
+            text_size: 12,
         }
     }
 }
@@ -169,9 +177,9 @@ impl Gui {
 
                         match rx_oneshot.await {
                             Ok(ports) => Message::MidiPortsLoaded(Ok(ports)),
-                            Err(e) => {
-                                Message::MidiPortsLoaded(Err(format!("Oneshot receive error: {e}")))
-                            }
+                            Err(e) => Message::MidiPortsLoaded(Err(format!(
+                                "Oneshot receive error: {e}"
+                            ))),
                         }
                     },
                     |msg| msg,
@@ -180,7 +188,10 @@ impl Gui {
             Message::MidiPortsLoaded(result) => match result {
                 Ok(ports) => {
                     self.midi_out_ports = ports;
-                    info!("Successfully received new ports: {:?}", self.midi_out_ports);
+                    info!(
+                        "Successfully received new ports: {:?}",
+                        self.midi_out_ports
+                    );
                 }
                 Err(e) => {
                     warn!("Failed to load ports: {}", e);
@@ -220,17 +231,20 @@ impl Gui {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let sequencer_left_view =
-            Container::new(self.sequencer_left.view().map(Message::LeftSequencer))
-                .width(Length::FillPortion(1))
-                .height(Length::Fill);
+        let sequencer_left_view = Container::new(
+            self.sequencer_left.view().map(Message::LeftSequencer),
+        )
+        .width(Length::FillPortion(1))
+        .height(Length::Fill);
 
-        let sequencer_right_view =
-            Container::new(self.sequencer_right.view().map(Message::RightSequencer))
-                .width(Length::FillPortion(1))
-                .height(Length::Fill);
+        let sequencer_right_view = Container::new(
+            self.sequencer_right.view().map(Message::RightSequencer),
+        )
+        .width(Length::FillPortion(1))
+        .height(Length::Fill);
 
-        let sequencer_content = row![sequencer_left_view, sequencer_right_view].spacing(20);
+        let sequencer_content =
+            row![sequencer_left_view, sequencer_right_view].spacing(20);
 
         let mixer_content = Container::new(self.view_mixer())
             .width(Length::Fill)
@@ -240,39 +254,56 @@ impl Gui {
             .width(Length::Fill)
             .height(Length::Fill);
 
+        let general_help_text = column![
+            text("General")
+                .color(self.theme.secondary_text_color)
+                .font(self.theme.bold_font)
+                .size(self.theme.header_text_size),
+            text("Spacebar: resume / pause playback\nTab: change active sequencer\nCtrl+C: exit program")
+                .color(self.theme.text_color)
+                .size(self.theme.text_size),
+            text("Active sequencer")
+                .color(self.theme.secondary_text_color)
+                .font(self.theme.bold_font).size(self.theme.header_text_size),
+            text("W / S: increase / decrease pitch by 1 step\nD / A: increase / decrease octave by 1")
+                .color(self.theme.text_color)
+                .size(self.theme.text_size),
+        ];
+
+        let sequencer_help_text = column![
+            text("Euclidean sequencer")
+                .color(self.theme.secondary_text_color)
+                .font(self.theme.bold_font)
+                .size(self.theme.header_text_size),
+            text("Up / Down: increase / decrease steps\nRight / Left: increase / decrease pulses")
+                .color(self.theme.text_color)
+                .size(self.theme.text_size),
+            text("Mixer")
+                .color(self.theme.secondary_text_color)
+                .font(self.theme.bold_font)
+                .size(self.theme.header_text_size),
+            text("R / F: increase / decrease mixer ratio")
+                .color(self.theme.text_color)
+                .size(self.theme.text_size),
+        ];
+
         let help_text_content = column![
             text("Controls")
                 .color(self.theme.primary_text_color)
                 .font(self.theme.header_font)
-                .align_y(Start),
-            vertical_space().height(10),
-            text("General").color(self.theme.secondary_text_color).font(self.theme.bold_font),
-            text(
-                "Spacebar: resume / pause playback\nTab: change active sequencer\nCtrl+C: exit program"
-            )
-            .color(self.theme.text_color),
-            vertical_space().height(20),
-            text("Active sequencer").color(self.theme.secondary_text_color).font(self.theme.bold_font),
-            text(
-                "W / S: increase / decrease pitch by 1 step\nD / A: increase / decrease octave by 1"
-            ).color(self.theme.text_color),
-            vertical_space().height(20),
-            text("Euclidean sequencer").color(self.theme.secondary_text_color).font(self.theme.bold_font),
-            text("Up / Down: increase / decrease steps\nRight / Left: increase / decrease pulses").color(self.theme.text_color),
-            vertical_space().height(20),
-            text("Mixer").color(self.theme.secondary_text_color).font(self.theme.bold_font),
-            text("R / F: increase / decrease mixer ratio").color(self.theme.text_color),
-            vertical_space().height(80)
+                .align_y(Start)
+                .size(self.theme.header_text_size),
+            row![general_help_text, sequencer_help_text]
         ];
 
         let content = column![
-            sequencer_content,
-            mixer_content,
-            midi_content,
-            help_text_content
+            sequencer_content.height(Length::FillPortion(3)),
+            mixer_content.height(Length::FillPortion(1)),
+            midi_content.height(Length::FillPortion(1)),
+            help_text_content.height(Length::FillPortion(1))
         ]
-        .align_x(Center)
-        .spacing(20);
+        .spacing(1)
+        .align_x(Center);
 
         container(content)
             .width(Length::Fill)
@@ -282,54 +313,59 @@ impl Gui {
 
     pub fn view_mixer(&self) -> Element<Message> {
         let theme = &self.theme;
-        let slider = iced::widget::slider(0.0..=1.0, self.mixer_ratio, Message::MixerRatioChanged)
-            .style(move |_: &iced::Theme, status: SliderStatus| {
-                let handle_color = match status {
-                    SliderStatus::Hovered => theme.accent_color,
-                    SliderStatus::Dragged => theme.primary_color,
-                    SliderStatus::Active => theme.primary_color_muted,
-                };
+        let slider = iced::widget::slider(
+            0.0..=1.0,
+            self.mixer_ratio,
+            Message::MixerRatioChanged,
+        )
+        .style(move |_: &iced::Theme, status: SliderStatus| {
+            let handle_color = match status {
+                SliderStatus::Hovered => theme.accent_color,
+                SliderStatus::Dragged => theme.primary_color,
+                SliderStatus::Active => theme.primary_color_muted,
+            };
 
-                let rail_backgrounds = match status {
-                    SliderStatus::Hovered => (
-                        Background::Color(theme.primary_color_muted),
-                        Background::Color(theme.surface_color),
-                    ),
-                    _ => (
-                        Background::Color(theme.overlay_color),
-                        Background::Color(theme.surface_color),
-                    ),
-                };
+            let rail_backgrounds = match status {
+                SliderStatus::Hovered => (
+                    Background::Color(theme.primary_color_muted),
+                    Background::Color(theme.surface_color),
+                ),
+                _ => (
+                    Background::Color(theme.overlay_color),
+                    Background::Color(theme.surface_color),
+                ),
+            };
 
-                SliderStyle {
-                    rail: Rail {
-                        backgrounds: rail_backgrounds,
-                        width: 5.,
-                        border: Border {
-                            color: theme.accent_color_muted,
-                            width: 2.,
-                            radius: Radius::default(),
-                        },
+            SliderStyle {
+                rail: Rail {
+                    backgrounds: rail_backgrounds,
+                    width: 5.,
+                    border: Border {
+                        color: theme.accent_color_muted,
+                        width: 2.,
+                        radius: Radius::default(),
                     },
-                    handle: Handle {
-                        shape: slider::HandleShape::Rectangle {
-                            width: 10,
-                            border_radius: Radius::default(),
-                        },
-                        background: Background::Color(handle_color),
-                        border_width: 2.,
-                        border_color: theme.accent_color,
+                },
+                handle: Handle {
+                    shape: slider::HandleShape::Rectangle {
+                        width: 10,
+                        border_radius: Radius::default(),
                     },
-                }
-            });
+                    background: Background::Color(handle_color),
+                    border_width: 2.,
+                    border_color: theme.accent_color,
+                },
+            }
+        });
         let content = column![
             text("Mixer")
                 .color(self.theme.primary_text_color)
-                .font(self.theme.bold_font),
+                .font(self.theme.bold_font)
+                .size(self.theme.header_text_size),
             slider,
         ]
         .align_x(Center)
-        .spacing(20);
+        .spacing(5);
 
         container(content)
             .width(Length::Fill)
@@ -378,13 +414,14 @@ impl Gui {
             });
 
         let content = column![
-            text("Mixer")
+            text("MIDI")
                 .color(self.theme.primary_text_color)
-                .font(self.theme.bold_font),
+                .font(self.theme.bold_font)
+                .size(self.theme.header_text_size),
             row![dropdown, button].spacing(10)
         ]
         .align_x(Center)
-        .spacing(20);
+        .spacing(5);
 
         container(content)
             .width(Length::Fill)
@@ -432,7 +469,9 @@ fn poll() -> impl Stream<Item = Event> {
         loop {
             use iced_futures::futures::StreamExt;
 
-            if let Message::ReceivedEvent(event) = receiver.select_next_some().await {
+            if let Message::ReceivedEvent(event) =
+                receiver.select_next_some().await
+            {
                 output
                     .send(event)
                     .await

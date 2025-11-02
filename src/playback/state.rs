@@ -1,5 +1,4 @@
 use midir::MidiOutputConnection;
-use std::fmt;
 
 // MIDI event to send over midir
 #[derive(Debug, Clone, Copy)]

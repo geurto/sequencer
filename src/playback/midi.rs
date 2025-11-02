@@ -1,4 +1,13 @@
-pub mod state;
+use tokio::sync::oneshot;
+
+pub enum MidiCommand {
+    GetPorts {
+        responder: oneshot::Sender<Vec<String>>,
+    },
+    SetPort {
+        out_port: String,
+    },
+}
 
 pub mod midi_utils {
     use anyhow::{anyhow, Error};

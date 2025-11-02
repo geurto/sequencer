@@ -10,15 +10,10 @@ use tokio::signal;
 use tokio::sync::{mpsc, RwLock};
 
 use sequencer::{
-    gui::Message,
-    midi::{midi_utils, state::MidiCommand},
-    note::MixedSequence,
-    run_input_handler,
-    sequencers::euclidean::gui::Gui as EuclideanGui,
-    start_polling,
-    state::SequencerSlot,
-    EuclideanSequencer, Gui, Mixer, PlaybackCommand, PlaybackEngine, PlaybackHandler, Sequence,
-    Sequencer, SharedState,
+    gui::Message, midi_utils, note::MixedSequence, run_input_handler,
+    sequencers::euclidean::gui::Gui as EuclideanGui, start_polling, state::SequencerSlot,
+    EuclideanSequencer, Gui, MidiCommand, Mixer, PlaybackCommand, PlaybackEngine, PlaybackHandler,
+    Sequence, Sequencer, SharedState,
 };
 
 #[tokio::main]
@@ -28,10 +23,10 @@ async fn main() -> Result<()> {
     // key input handling
     let (tx_keys, rx_keys) = mpsc::channel::<HashSet<Keycode>>(100);
 
-    // separate sequences from left/right - (Option<Sequence>, Option<Sequence>)
+    // sequences FROM sequencers TO mixer
     let (tx_sequence, rx_sequence) = mpsc::channel::<(Option<Sequence>, Option<Sequence>)>(1);
 
-    // final sequence for playback - Sequence
+    // mixed sequence FROM mixer TO playback_handler
     let (tx_mixed_sequence, rx_mixed_sequence) = mpsc::channel::<MixedSequence>(1);
 
     // MIDI messages, either GUI or playing a note
@@ -80,8 +75,13 @@ async fn main() -> Result<()> {
     let midi_ports = midi_utils::list_ports()?;
     let midi_conn = midi_utils::create_connection(midi_ports[0].clone())?;
 
+    // Link between async GUI and sync playback engine
     let tx_gui_playback = tx_gui.clone();
-    let mut playback_handler = PlaybackHandler::new(rx_midi, tx_gui_playback);
+    let mut playback_handler =
+        PlaybackHandler::new(rx_midi, rx_mixed_sequence, tx_playback_cmd, tx_gui_playback);
+    tokio::spawn(async move { playback_handler.run().await });
+
+    // Synchronous playback engine that handles MIDI control
     let playback_engine = PlaybackEngine::new(rx_playback_cmd, tx_playback_status, midi_conn);
     thread::spawn(move || {
         playback_engine.run();
