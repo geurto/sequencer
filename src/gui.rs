@@ -18,7 +18,7 @@ use iced::{
         slider::{
             self, Handle, Rail, Status as SliderStatus, Style as SliderStyle,
         },
-        vertical_space, Container,
+        Container,
     },
     Alignment::{Center, Start},
     Background, Border, Color, Element, Font, Length, Shadow, Subscription,

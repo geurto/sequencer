@@ -1,9 +1,8 @@
 pub mod gui;
 pub mod state;
 
-use crate::note::{Note, NoteDuration, Sequence};
-use crate::sequencers::common::Sequencer;
 use crate::sequencers::euclidean::state::EuclideanSequencerState;
+use crate::sequencers::{Note, NoteDuration, Sequence, Sequencer};
 
 use crate::state::{SequencerSlot, SharedState};
 use anyhow::Result;
@@ -54,11 +53,17 @@ impl Sequencer for EuclideanSequencer {
             .collect::<Vec<_>>();
 
         for i in 0..self.cached_state.steps {
-            let note = if beat_locations.contains(&(i % self.cached_state.steps)) {
-                Note::new(self.cached_state.pitch, 100, NoteDuration::Sixteenth, bpm)
-            } else {
-                Note::new(0, 0, NoteDuration::Sixteenth, bpm)
-            };
+            let note =
+                if beat_locations.contains(&(i % self.cached_state.steps)) {
+                    Note::new(
+                        self.cached_state.pitch,
+                        100,
+                        NoteDuration::Sixteenth,
+                        bpm,
+                    )
+                } else {
+                    Note::new(0, 0, NoteDuration::Sixteenth, bpm)
+                };
             sequence.notes.push(note);
         }
         debug!(
@@ -74,8 +79,12 @@ impl Sequencer for EuclideanSequencer {
 
         loop {
             let state = match self.sequencer_slot {
-                SequencerSlot::Left => self.shared_state.read().await.left_state,
-                SequencerSlot::Right => self.shared_state.read().await.right_state,
+                SequencerSlot::Left => {
+                    self.shared_state.read().await.left_state
+                }
+                SequencerSlot::Right => {
+                    self.shared_state.read().await.right_state
+                }
             };
 
             if state != previous_state {
@@ -92,10 +101,14 @@ impl Sequencer for EuclideanSequencer {
                                 "Sending sequence {:?} to slot {:?}",
                                 sequence, self.sequencer_slot
                             );
-                            self.tx_sequence.send((Some(sequence), None)).await?;
+                            self.tx_sequence
+                                .send((Some(sequence), None))
+                                .await?;
                         }
                         SequencerSlot::Right => {
-                            self.tx_sequence.send((None, Some(sequence))).await?
+                            self.tx_sequence
+                                .send((None, Some(sequence)))
+                                .await?
                         }
                     };
                 }

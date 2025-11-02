@@ -1,5 +1,7 @@
 use midir::MidiOutputConnection;
 
+pub const TICKS_PER_QUARTER_NOTE: u32 = 480;
+
 // MIDI event to send over midir
 #[derive(Debug, Clone, Copy)]
 pub enum MidiEventType {

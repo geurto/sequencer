@@ -9,7 +9,7 @@ use iced::{
     Element, Length, Point, Renderer, Size, Subscription,
 };
 
-use crate::{gui::CustomTheme, note::Sequence, state::SequencerSlot, SharedState};
+use crate::{gui::CustomTheme, state::SequencerSlot, Sequence, SharedState};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -111,7 +111,9 @@ impl canvas::Program<Message> for Gui {
                 } else {
                     self.theme.surface_color
                 };
-                if 4 * row + col == self.state.current_note_index % sequencer_state.steps {
+                if 4 * row + col
+                    == self.state.current_note_index % sequencer_state.steps
+                {
                     frame.fill(&circle, self.theme.primary_color);
                 } else {
                     frame.fill(&circle, color);
@@ -126,11 +128,17 @@ impl canvas::Program<Message> for Gui {
 
         let grid_width = 4. * CIRCLE_SPACING;
 
-        let box_top_left = Point::new(start_x, start_y + grid_width + BOX_PADDING_FROM_CIRCLES);
+        let box_top_left = Point::new(
+            start_x,
+            start_y + grid_width + BOX_PADDING_FROM_CIRCLES,
+        );
         let box_size = Size::new(grid_width, BOX_HEIGHT);
 
-        let rounded_rect_path =
-            Path::rounded_rectangle(box_top_left, box_size, Radius::new(BOX_CORNER_RADIUS));
+        let rounded_rect_path = Path::rounded_rectangle(
+            box_top_left,
+            box_size,
+            Radius::new(BOX_CORNER_RADIUS),
+        );
         frame.fill(&rounded_rect_path, self.theme.primary_color_muted);
 
         let box_center = Point::new(

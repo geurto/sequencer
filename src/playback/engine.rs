@@ -1,15 +1,14 @@
-use log::{debug, info};
+use log::{debug, error, info};
 use midir::MidiOutputConnection;
 use std::{
     sync::mpsc::{Receiver, Sender},
     time::{Duration, Instant},
 };
 
-use crate::playback::state::MidiEventType;
-
-use super::state::{PlaybackCommand, PlaybackStatus, PolyphonicSequence, TimedEvent};
-
-const TICKS_PER_QUARTER_NOTE: u32 = 480;
+use crate::playback::state::{
+    MidiEventType, PlaybackCommand, PlaybackStatus, PolyphonicSequence,
+    TimedEvent, TICKS_PER_QUARTER_NOTE,
+};
 
 pub struct PlaybackEngine {
     rx_command: Receiver<PlaybackCommand>,
@@ -65,7 +64,9 @@ impl PlaybackEngine {
                     }
                     PlaybackCommand::SetMidiChannel(_) => {}
                     PlaybackCommand::SetBPM(bpm) => self.bpm = bpm,
-                    PlaybackCommand::SetOutputConnection(conn) => self.midi_conn = conn,
+                    PlaybackCommand::SetOutputConnection(conn) => {
+                        self.midi_conn = conn
+                    }
                 }
             }
 
@@ -74,9 +75,27 @@ impl PlaybackEngine {
             let delta_time = now.duration_since(self.last_update_time);
             self.last_update_time = now;
 
-            if self.is_playing && !self.sequence.events.is_empty() {
-                let ticks_per_second = (self.bpm / 60.0) * TICKS_PER_QUARTER_NOTE as f64;
-                self.current_tick += delta_time.as_secs_f64() * ticks_per_second;
+            if self.is_playing {
+                let ticks_per_second =
+                    (self.bpm / 60.0) * TICKS_PER_QUARTER_NOTE as f64;
+                self.current_tick +=
+                    delta_time.as_secs_f64() * ticks_per_second;
+
+                // Send NotePlayed to update GUI
+                let near_note_boundary: bool = (self.current_tick as usize
+                    % TICKS_PER_QUARTER_NOTE as usize
+                    / 4)
+                    < 5;
+                if near_note_boundary {
+                    if let Err(e) =
+                        self.tx_status.send(PlaybackStatus::NotePlayed(
+                            self.current_tick as usize
+                                / (TICKS_PER_QUARTER_NOTE as usize / 4),
+                        ))
+                    {
+                        error!("Error sending PlaybackStatus: {e}");
+                    }
+                }
 
                 // Loop sequence
                 if self.current_tick >= self.sequence.total_ticks as f64 {
@@ -84,13 +103,17 @@ impl PlaybackEngine {
                     self.next_event_index = 0;
                 }
 
-                // Process sequence events
-                while let Some(&event) = self.sequence.events.get(self.next_event_index) {
-                    if event.tick as f64 <= self.current_tick {
-                        self.process_event(&event);
-                        self.next_event_index += 1;
-                    } else {
-                        break;
+                if !self.sequence.events.is_empty() {
+                    // Process sequence events
+                    while let Some(&event) =
+                        self.sequence.events.get(self.next_event_index)
+                    {
+                        if event.tick as f64 <= self.current_tick {
+                            self.process_event(&event);
+                            self.next_event_index += 1;
+                        } else {
+                            break;
+                        }
                     }
                 }
             }
@@ -109,7 +132,9 @@ impl PlaybackEngine {
                 velocity,
                 channel,
             } => [NOTE_ON | channel, pitch, velocity],
-            MidiEventType::NoteOff { pitch, channel } => [NOTE_OFF | channel, pitch, 0],
+            MidiEventType::NoteOff { pitch, channel } => {
+                [NOTE_OFF | channel, pitch, 0]
+            }
         };
 
         self.midi_conn
