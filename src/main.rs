@@ -1,8 +1,6 @@
 use anyhow::Result;
-use device_query::Keycode;
 use env_logger::Builder;
 use std::{
-    collections::HashSet,
     sync::{mpsc::channel as sync_channel, Arc, Mutex as SyncMutex},
     thread,
 };
@@ -11,17 +9,14 @@ use tokio::sync::{mpsc, RwLock};
 
 use sequencer::{
     gui::Message, midi_utils, playback::state::PolyphonicSequence,
-    run_input_handler, sequencers::euclidean::gui::Gui as EuclideanGui,
-    start_polling, state::SequencerSlot, EuclideanSequencer, Gui, MidiCommand,
-    Mixer, PlaybackEngine, PlaybackHandler, Sequence, Sequencer, SharedState,
+    sequencers::euclidean::gui::Gui as EuclideanGui, state::SequencerSlot,
+    EuclideanSequencer, Gui, MidiCommand, Mixer, PlaybackEngine,
+    PlaybackHandler, Sequence, Sequencer, SharedState,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
     Builder::new().filter(None, log::LevelFilter::Info).init();
-
-    // key input handling
-    let (tx_keys, rx_keys) = mpsc::channel::<HashSet<Keycode>>(100);
 
     // sequences FROM sequencers TO mixer
     let (tx_sequence, rx_sequence) =
@@ -70,25 +65,20 @@ async fn main() -> Result<()> {
     sequence_mixer.mix().await;
     tokio::spawn(async move { sequence_mixer.run().await });
 
-    // Input handling
-    start_polling(tx_keys);
-    let shared_state_input = shared_state.clone();
-    let tx_gui_input = tx_gui.clone();
-    tokio::spawn(async move {
-        run_input_handler(rx_keys, tx_gui_input, shared_state_input).await
-    });
-
     // Playback
     let midi_ports = midi_utils::list_ports()?;
     let midi_conn = midi_utils::create_connection(midi_ports[0].clone())?;
 
     // Link between async GUI and sync playback engine
+    let shared_state_input = shared_state.clone();
     let tx_gui_playback = tx_gui.clone();
     let mut playback_handler = PlaybackHandler::new(
         rx_midi,
         rx_mixed_sequence,
+        rx_playback_status,
         tx_playback_cmd,
         tx_gui_playback,
+        shared_state_input,
     );
     tokio::spawn(async move { playback_handler.run().await });
 

@@ -1,3 +1,4 @@
+use device_query::Keycode;
 use midir::MidiOutputConnection;
 
 pub const TICKS_PER_QUARTER_NOTE: u32 = 480;
@@ -44,4 +45,5 @@ pub enum PlaybackCommand {
 #[derive(Debug, Clone)]
 pub enum PlaybackStatus {
     NotePlayed(usize),
+    InputChanged(Vec<Keycode>),
 }

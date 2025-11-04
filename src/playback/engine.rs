@@ -1,5 +1,7 @@
+use device_query::{DeviceQuery, DeviceState, Keycode};
 use log::{debug, error, info};
 use midir::MidiOutputConnection;
+use std::collections::HashSet;
 use std::{
     sync::mpsc::{Receiver, Sender},
     time::{Duration, Instant},
@@ -49,6 +51,9 @@ impl PlaybackEngine {
         info!("Starting synchronous playback engine");
         self.last_update_time = Instant::now();
 
+        let device_state = DeviceState::new();
+        let mut last_keys = HashSet::new();
+
         loop {
             // Handle commands
             while let Ok(cmd) = self.rx_command.try_recv() {
@@ -68,6 +73,24 @@ impl PlaybackEngine {
                         self.midi_conn = conn
                     }
                 }
+            }
+
+            // Handle changes in input
+            let keys: HashSet<Keycode> =
+                device_state.get_keys().into_iter().collect();
+
+            if keys != last_keys {
+                let diff: Vec<_> =
+                    keys.difference(&last_keys).cloned().collect();
+                if let Err(e) =
+                    self.tx_status.send(PlaybackStatus::InputChanged(diff))
+                {
+                    error!(
+                        "Error sending input changes to PlaybackHandler: {e}"
+                    );
+                }
+
+                last_keys = keys;
             }
 
             // Advance play position

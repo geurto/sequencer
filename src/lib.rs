@@ -1,12 +1,10 @@
 pub mod gui;
-pub mod input;
 pub mod mixer;
 pub mod playback;
 pub mod sequencers;
 pub mod state;
 
 pub use gui::Gui;
-pub use input::{run_input_handler, start_polling};
 pub use mixer::{state::MixerState, Mixer};
 pub use playback::{
     engine::PlaybackEngine,
