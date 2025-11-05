@@ -11,12 +11,12 @@ use sequencer::{
     gui::Message, midi_utils, playback::state::PolyphonicSequence,
     sequencers::euclidean::gui::Gui as EuclideanGui, state::SequencerSlot,
     EuclideanSequencer, Gui, MidiCommand, Mixer, PlaybackEngine,
-    PlaybackHandler, Sequence, Sequencer, SharedState,
+    PlaybackHandler, PlaybackStatus, Sequence, Sequencer, SharedState,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    Builder::new().filter(None, log::LevelFilter::Info).init();
+    Builder::new().filter(None, log::LevelFilter::Debug).init();
 
     // sequences FROM sequencers TO mixer
     let (tx_sequence, rx_sequence) =
@@ -31,7 +31,8 @@ async fn main() -> Result<()> {
 
     // synchronous playback commands & status
     let (tx_playback_cmd, rx_playback_cmd) = sync_channel();
-    let (tx_playback_status, rx_playback_status) = sync_channel();
+    let (tx_playback_status, rx_playback_status) =
+        mpsc::unbounded_channel::<PlaybackStatus>();
 
     let shared_state: Arc<RwLock<SharedState>> =
         Arc::new(RwLock::new(SharedState::new(120.)));

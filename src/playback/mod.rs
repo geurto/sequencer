@@ -6,10 +6,7 @@ use anyhow::Result;
 use device_query::Keycode;
 use log::{error, info, warn};
 use state::{PlaybackCommand, PlaybackStatus, PolyphonicSequence};
-use std::sync::{
-    mpsc::{Receiver as SyncReceiver, Sender as SyncSender},
-    Arc, Mutex as SyncMutex,
-};
+use std::sync::{mpsc::Sender as SyncSender, Arc, Mutex as SyncMutex};
 use tokio::sync::{mpsc, RwLock};
 
 use crate::{
@@ -20,7 +17,7 @@ use crate::{
 pub struct PlaybackHandler {
     rx_midi: mpsc::Receiver<MidiCommand>,
     rx_sequence: mpsc::Receiver<PolyphonicSequence>,
-    rx_engine_status: SyncReceiver<PlaybackStatus>,
+    rx_engine_status: mpsc::UnboundedReceiver<PlaybackStatus>,
     tx_engine: SyncSender<PlaybackCommand>,
     tx_gui:
         Arc<SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>>,
@@ -31,7 +28,7 @@ impl PlaybackHandler {
     pub fn new(
         rx_midi: mpsc::Receiver<MidiCommand>,
         rx_sequence: mpsc::Receiver<PolyphonicSequence>,
-        rx_engine_status: SyncReceiver<PlaybackStatus>,
+        rx_engine_status: mpsc::UnboundedReceiver<PlaybackStatus>,
         tx_engine: SyncSender<PlaybackCommand>,
         tx_gui: Arc<
             SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>,

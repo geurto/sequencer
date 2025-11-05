@@ -3,9 +3,10 @@ use log::{debug, error, info};
 use midir::MidiOutputConnection;
 use std::collections::HashSet;
 use std::{
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::Receiver,
     time::{Duration, Instant},
 };
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::playback::state::{
     MidiEventType, PlaybackCommand, PlaybackStatus, PolyphonicSequence,
@@ -14,7 +15,7 @@ use crate::playback::state::{
 
 pub struct PlaybackEngine {
     rx_command: Receiver<PlaybackCommand>,
-    tx_status: Sender<PlaybackStatus>,
+    tx_status: UnboundedSender<PlaybackStatus>,
     midi_conn: MidiOutputConnection,
 
     is_playing: bool,
@@ -29,7 +30,7 @@ pub struct PlaybackEngine {
 impl PlaybackEngine {
     pub fn new(
         rx_command: Receiver<PlaybackCommand>,
-        tx_status: Sender<PlaybackStatus>,
+        tx_status: UnboundedSender<PlaybackStatus>,
         midi_conn: MidiOutputConnection,
     ) -> Self {
         Self {
