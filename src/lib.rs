@@ -8,7 +8,7 @@ pub use mixer::{state::MixerState, Mixer};
 pub use playback::{
     engine::PlaybackEngine,
     midi::{midi_utils, MidiCommand},
-    state::{PlaybackCommand, PlaybackStatus},
+    state::{PlaybackCommand, PlaybackStatus, SharedState},
     PlaybackHandler,
 };
 pub use sequencers::{

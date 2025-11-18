@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio::{signal, sync::RwLock};
 
 use sequencer::{
-    gui::{sequencers::euclidean::Gui as EuclideanGui, Message as GuiMessage},
+    gui::{sequencers::euclidean::Gui as EuclideanGui, state::GuiMessage},
     midi_utils,
     playback::state::{PolyphonicSequence, SequencerSlot, SharedState},
     EuclideanSequencer, Gui, MidiCommand, Mixer, PlaybackEngine,

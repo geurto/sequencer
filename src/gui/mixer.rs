@@ -1,4 +1,4 @@
-use super::{Gui, Message};
+use super::{Gui, GuiMessage};
 
 use iced::{
     border::Radius,
@@ -11,12 +11,12 @@ use iced::{
 };
 
 impl Gui {
-    pub fn view_mixer(&self) -> Element<Message> {
+    pub fn view_mixer(&self) -> Element<GuiMessage> {
         let theme = &self.theme;
         let slider = iced::widget::slider(
             0.0..=1.0,
             self.mixer_ratio,
-            Message::MixerRatioChanged,
+            GuiMessage::MixerRatioChanged,
         )
         .style(move |_: &iced::Theme, status: SliderStatus| {
             let handle_color = match status {

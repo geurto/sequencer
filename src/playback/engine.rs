@@ -1,5 +1,3 @@
-// TODO fix the SharedState situation (everything in a Sender/Receiver?) to get is_playing to work
-// here
 use device_query::{DeviceQuery, DeviceState, Keycode};
 use log::{error, info};
 use midir::MidiOutputConnection;
@@ -24,6 +22,7 @@ pub struct PlaybackEngine {
     sequence: PolyphonicSequence,
     next_event_index: usize,
     current_tick: f64,
+    next_note_tick: f64,
     bpm: f64,
     midi_channel: u8,
 
@@ -45,7 +44,8 @@ impl PlaybackEngine {
             sequence: PolyphonicSequence::default(),
             next_event_index: 0,
             current_tick: 0.,
-            bpm: 0.,
+            next_note_tick: 0.,
+            bpm: 120.,
             midi_channel: 0,
 
             last_update_time: Instant::now(),
@@ -122,11 +122,7 @@ impl PlaybackEngine {
                     delta_time.as_secs_f64() * ticks_per_second;
 
                 // Send NotePlayed to update GUI
-                let near_note_boundary: bool = (self.current_tick as usize
-                    % TICKS_PER_QUARTER_NOTE as usize
-                    / 4)
-                    < 5;
-                if near_note_boundary {
+                if self.current_tick > self.next_note_tick {
                     if let Err(e) =
                         self.tx_status.send(PlaybackStatus::NotePlayed(
                             self.current_tick as usize
@@ -135,6 +131,7 @@ impl PlaybackEngine {
                     {
                         error!("Error sending PlaybackStatus: {e}");
                     }
+                    self.next_note_tick += TICKS_PER_QUARTER_NOTE as f64 / 4.;
                 }
 
                 // Loop sequence

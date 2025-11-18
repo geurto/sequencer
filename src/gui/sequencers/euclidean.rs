@@ -11,14 +11,12 @@ use iced::{
 
 use crate::{
     gui::CustomTheme, playback::state::SequencerSlot, EuclideanSequencerState,
-    Sequence,
+    Sequence, SharedState,
 };
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    UpdateState(EuclideanSequencerState),
-    UpdateActiveSequencer(SequencerSlot),
-    UpdateCurrentNoteIndex(usize),
+    UpdateState(SharedState),
 }
 
 pub struct Gui {
@@ -48,13 +46,12 @@ impl Gui {
     pub fn update(&mut self, message: Message) {
         match message {
             Message::UpdateState(new_state) => {
-                self.state = new_state;
-            }
-            Message::UpdateActiveSequencer(slot) => {
-                self.active_sequencer = slot == self.slot;
-            }
-            Message::UpdateCurrentNoteIndex(idx) => {
-                self.current_note_index = idx
+                self.state = match self.slot {
+                    SequencerSlot::Left => new_state.left_sequencer,
+                    SequencerSlot::Right => new_state.right_sequencer,
+                };
+                self.active_sequencer = new_state.active_sequencer == self.slot;
+                self.current_note_index = new_state.current_note_index;
             }
         }
     }

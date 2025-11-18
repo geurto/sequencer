@@ -11,7 +11,10 @@ use std::{
 };
 use tokio::sync::{mpsc, RwLock};
 
-use crate::{gui::Message as GuiMessage, midi_utils, MidiCommand};
+use crate::{
+    gui::state::{Event, GuiMessage},
+    midi_utils, MidiCommand,
+};
 use state::{
     PlaybackCommand, PlaybackStatus, PolyphonicSequence, SequencerSlot,
     SharedState,
@@ -56,12 +59,10 @@ impl PlaybackHandler {
             while let Ok(status) = self.rx_engine_status.try_recv() {
                 match status {
                     PlaybackStatus::NotePlayed(i) => {
-                        {
-                            let mut w_state = self.state.write().await;
-                            w_state.current_note_index = i;
-                            drop(w_state);
-                        }
-                        self.update_gui(GuiMessage::NotePlayed(i)).await;
+                        let mut w_state = self.state.write().await;
+                        w_state.current_note_index = i;
+                        drop(w_state);
+                        self.update_gui().await;
                     }
                     PlaybackStatus::InputChanged(input) => {
                         self.handle_input_change(input).await
@@ -218,12 +219,16 @@ impl PlaybackHandler {
             };
         }
         drop(w_state);
+        self.update_gui().await;
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    pub async fn update_gui(&self, message: GuiMessage) {
+    pub async fn update_gui(&self) {
+        let state = self.state.read().await;
         if let Some(mut tx) = self.tx_gui.lock().unwrap().clone() {
-            if let Err(e) = tx.try_send(message) {
+            if let Err(e) = tx.try_send(GuiMessage::ReceivedEvent(
+                Event::StateChanged(state.clone()),
+            )) {
                 error!("Error sending Message to GUI: {:?}", e);
             }
         }

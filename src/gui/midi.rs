@@ -1,4 +1,4 @@
-use super::{Gui, Message};
+use super::{Gui, GuiMessage};
 
 use iced::{
     border::Radius,
@@ -12,17 +12,17 @@ use iced::{
 };
 
 impl Gui {
-    pub fn view_midi(&self) -> Element<Message> {
+    pub fn view_midi(&self) -> Element<GuiMessage> {
         let dropdown = pick_list(
             self.midi_out_ports.clone(),
             self.selected_midi_port.clone(),
-            Message::MidiPortSelected,
+            GuiMessage::MidiPortSelected,
         )
         .placeholder("Select MIDI output interface");
 
         let theme = &self.theme;
         let button = button("⟳")
-            .on_press(Message::RefreshMidiPorts)
+            .on_press(GuiMessage::RefreshMidiPorts)
             .height(25)
             .width(25)
             .style(move |_: &iced::Theme, status: ButtonStatus| {
