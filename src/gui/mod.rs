@@ -45,7 +45,7 @@ impl Gui {
             sequencer_left,
             sequencer_right,
             mixer_ratio: 0.5,
-            midi_out_ports: vec!["".to_string()],
+            midi_out_ports: vec![],
             selected_midi_port: None,
             theme: CustomTheme::default(),
         }

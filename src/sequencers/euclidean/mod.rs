@@ -60,46 +60,52 @@ impl Sequencer for EuclideanSequencer {
     }
 
     async fn run(&mut self) {
-        let r_state = match self.sequencer_slot {
-            SequencerSlot::Left => {
-                self.shared_state.read().await.left_sequencer
-            }
-            SequencerSlot::Right => {
-                self.shared_state.read().await.right_sequencer
-            }
-        };
-        if r_state != self.state {
-            debug!(
-                "Euclidean sequencer {:?} new state: {:?}",
-                self.sequencer_slot, r_state
-            );
-            self.state = r_state;
+        loop {
+            let r_state = match self.sequencer_slot {
+                SequencerSlot::Left => {
+                    self.shared_state.read().await.left_sequencer
+                }
+                SequencerSlot::Right => {
+                    self.shared_state.read().await.right_sequencer
+                }
+            };
+            if r_state != self.state {
+                debug!(
+                    "Euclidean sequencer {:?} new state: {:?}",
+                    self.sequencer_slot, r_state
+                );
+                self.state = r_state;
 
-            let sequence = self.generate_sequence().await;
-            {
-                match self.sequencer_slot {
-                    SequencerSlot::Left => {
-                        debug!(
-                            "Sending {:?} sequence to mixer",
-                            self.sequencer_slot
-                        );
-                        if let Err(e) =
-                            self.tx_sequence.send((Some(sequence), None)).await
-                        {
-                            error!("Error sending left Sequence: {e}");
+                let sequence = self.generate_sequence().await;
+                {
+                    match self.sequencer_slot {
+                        SequencerSlot::Left => {
+                            debug!(
+                                "Sending {:?} sequence to mixer",
+                                self.sequencer_slot
+                            );
+                            if let Err(e) = self
+                                .tx_sequence
+                                .send((Some(sequence), None))
+                                .await
+                            {
+                                error!("Error sending left Sequence: {e}");
+                            }
                         }
-                    }
-                    SequencerSlot::Right => {
-                        if let Err(e) =
-                            self.tx_sequence.send((None, Some(sequence))).await
-                        {
-                            error!("Error sending right Sequence: {e}");
+                        SequencerSlot::Right => {
+                            if let Err(e) = self
+                                .tx_sequence
+                                .send((None, Some(sequence)))
+                                .await
+                            {
+                                error!("Error sending right Sequence: {e}");
+                            }
                         }
-                    }
-                };
+                    };
+                }
             }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
 }

@@ -37,37 +37,39 @@ impl Mixer {
     }
 
     pub async fn run(&mut self) {
-        let r_state = self.shared_state.read().await.mixer;
-        if r_state != self.state {
-            debug!("Mixer received update request");
-            self.state = r_state;
-            self.mix().await;
-        }
-
-        while let Ok(sequences) = self.rx_sequence.try_recv() {
-            debug!("Mixer received sequences.");
-            match sequences {
-                (Some(left), Some(right)) => self.sequences = (left, right),
-                (Some(left), None) => {
-                    self.sequences = (left, self.sequences.1.clone())
-                }
-                (None, Some(right)) => {
-                    self.sequences = (self.sequences.0.clone(), right)
-                }
-                (None, None) => {}
+        loop {
+            let r_state = self.shared_state.read().await.mixer;
+            if r_state != self.state {
+                debug!("Mixer received update request");
+                self.state = r_state;
+                self.mix().await;
             }
-            let mixed_sequence = self.mix().await;
-            let polyphonic_sequence =
-                self.make_polyphonic_sequence(mixed_sequence).await;
 
-            if let Err(e) =
-                self.tx_polyphonic_sequence.send(polyphonic_sequence).await
-            {
-                error!("Error sending mixed sequence: {}", e);
+            while let Ok(sequences) = self.rx_sequence.try_recv() {
+                debug!("Mixer received sequences.");
+                match sequences {
+                    (Some(left), Some(right)) => self.sequences = (left, right),
+                    (Some(left), None) => {
+                        self.sequences = (left, self.sequences.1.clone())
+                    }
+                    (None, Some(right)) => {
+                        self.sequences = (self.sequences.0.clone(), right)
+                    }
+                    (None, None) => {}
+                }
+                let mixed_sequence = self.mix().await;
+                let polyphonic_sequence =
+                    self.make_polyphonic_sequence(mixed_sequence).await;
+
+                if let Err(e) =
+                    self.tx_polyphonic_sequence.send(polyphonic_sequence).await
+                {
+                    error!("Error sending mixed sequence: {}", e);
+                }
             }
-        }
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
     }
 
     pub async fn mix(&mut self) -> Sequence {
