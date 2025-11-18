@@ -1,5 +1,7 @@
+// TODO fix the SharedState situation (everything in a Sender/Receiver?) to get is_playing to work
+// here
 use device_query::{DeviceQuery, DeviceState, Keycode};
-use log::{debug, error, info};
+use log::{error, info};
 use midir::MidiOutputConnection;
 use std::collections::HashSet;
 use std::{
@@ -23,6 +25,7 @@ pub struct PlaybackEngine {
     next_event_index: usize,
     current_tick: f64,
     bpm: f64,
+    midi_channel: u8,
 
     last_update_time: Instant,
 }
@@ -43,6 +46,7 @@ impl PlaybackEngine {
             next_event_index: 0,
             current_tick: 0.,
             bpm: 0.,
+            midi_channel: 0,
 
             last_update_time: Instant::now(),
         }
@@ -59,16 +63,16 @@ impl PlaybackEngine {
             // Handle commands
             while let Ok(cmd) = self.rx_command.try_recv() {
                 match cmd {
-                    PlaybackCommand::Play => self.is_playing = true,
-                    PlaybackCommand::Stop => self.is_playing = false,
                     PlaybackCommand::LoadSequence(seq) => {
-                        debug!(
+                        info!(
                             "Engine received new sequence of length {}",
                             seq.events.len()
                         );
                         self.sequence = seq;
                     }
-                    PlaybackCommand::SetMidiChannel(_) => {}
+                    PlaybackCommand::SetMidiChannel(channel) => {
+                        self.midi_channel = channel
+                    }
                     PlaybackCommand::SetBPM(bpm) => self.bpm = bpm,
                     PlaybackCommand::SetOutputConnection(conn) => {
                         self.midi_conn = conn
@@ -83,6 +87,18 @@ impl PlaybackEngine {
             if keys != last_keys {
                 let diff: Vec<_> =
                     keys.difference(&last_keys).cloned().collect();
+
+                // Handle playback changes here to save time (vs Engine->StateHandler->Engine)
+                for key in diff.clone() {
+                    match key {
+                        Keycode::Space => self.is_playing = !self.is_playing,
+                        Keycode::C => {
+                            self.midi_channel = (self.midi_channel + 1) % 16
+                        }
+
+                        _ => {}
+                    };
+                }
                 if let Err(e) =
                     self.tx_status.send(PlaybackStatus::InputChanged(diff))
                 {
@@ -151,13 +167,11 @@ impl PlaybackEngine {
         const NOTE_OFF: u8 = 0x80;
 
         let message = match timed_event.event {
-            MidiEventType::NoteOn {
-                pitch,
-                velocity,
-                channel,
-            } => [NOTE_ON | channel, pitch, velocity],
-            MidiEventType::NoteOff { pitch, channel } => {
-                [NOTE_OFF | channel, pitch, 0]
+            MidiEventType::NoteOn { pitch, velocity } => {
+                [NOTE_ON | self.midi_channel, pitch, velocity]
+            }
+            MidiEventType::NoteOff { pitch } => {
+                [NOTE_OFF | self.midi_channel, pitch, 0]
             }
         };
 

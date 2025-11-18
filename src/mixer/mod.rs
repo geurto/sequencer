@@ -4,72 +4,71 @@ use crate::{
     playback::state::{
         MidiEventType, PolyphonicSequence, TimedEvent, TICKS_PER_QUARTER_NOTE,
     },
-    MixerState, Sequence, SharedState,
+    MixerState, Sequence,
 };
 use log::{debug, error, info};
 use num::integer;
 use rand::random;
-use std::{cmp::max, sync::Arc};
-use tokio::sync::{mpsc, RwLock};
+use std::cmp::max;
+use tokio::sync::mpsc;
 
 pub struct Mixer {
-    shared_state: Arc<RwLock<SharedState>>,
-    rx_sequence: mpsc::Receiver<(Option<Sequence>, Option<Sequence>)>,
+    state: MixerState,
     sequences: (Sequence, Sequence),
+    rx_state: mpsc::Receiver<MixerState>,
+    rx_sequence: mpsc::Receiver<(Option<Sequence>, Option<Sequence>)>,
     tx_polyphonic_sequence: mpsc::Sender<PolyphonicSequence>,
 }
 
 impl Mixer {
     pub fn new(
-        shared_state: Arc<RwLock<SharedState>>,
-        tx_polyphonic_sequence: mpsc::Sender<PolyphonicSequence>,
+        state: MixerState,
+        rx_state: mpsc::Receiver<MixerState>,
         rx_sequence: mpsc::Receiver<(Option<Sequence>, Option<Sequence>)>,
+        tx_polyphonic_sequence: mpsc::Sender<PolyphonicSequence>,
     ) -> Self {
         Mixer {
-            shared_state,
-            rx_sequence,
+            state,
             sequences: (Sequence::default(), Sequence::default()),
+            rx_state,
+            rx_sequence,
             tx_polyphonic_sequence,
         }
     }
 
     pub async fn run(&mut self) {
-        let mut previous_state = MixerState::default();
-
-        loop {
-            let state = self.shared_state.read().await.mixer_state.clone();
-
-            if state != previous_state {
+        while let Ok(state) = self.rx_state.try_recv() {
+            if state != self.state {
                 debug!("Mixer received update request");
+                self.state = state.clone();
                 self.mix().await;
-                previous_state = state;
             }
-
-            if let Some(sequences) = self.rx_sequence.recv().await {
-                debug!("Mixer received sequences {:?}", sequences);
-                match sequences {
-                    (Some(left), Some(right)) => self.sequences = (left, right),
-                    (Some(left), None) => {
-                        self.sequences = (left, self.sequences.1.clone())
-                    }
-                    (None, Some(right)) => {
-                        self.sequences = (self.sequences.0.clone(), right)
-                    }
-                    (None, None) => {}
-                }
-                let mixed_sequence = self.mix().await;
-                let polyphonic_sequence =
-                    self.make_polyphonic_sequence(mixed_sequence).await;
-
-                if let Err(e) =
-                    self.tx_polyphonic_sequence.send(polyphonic_sequence).await
-                {
-                    error!("Error sending mixed sequence: {}", e);
-                }
-            }
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
+
+        while let Ok(sequences) = self.rx_sequence.try_recv() {
+            debug!("Mixer received sequences.");
+            match sequences {
+                (Some(left), Some(right)) => self.sequences = (left, right),
+                (Some(left), None) => {
+                    self.sequences = (left, self.sequences.1.clone())
+                }
+                (None, Some(right)) => {
+                    self.sequences = (self.sequences.0.clone(), right)
+                }
+                (None, None) => {}
+            }
+            let mixed_sequence = self.mix().await;
+            let polyphonic_sequence =
+                self.make_polyphonic_sequence(mixed_sequence).await;
+
+            if let Err(e) =
+                self.tx_polyphonic_sequence.send(polyphonic_sequence).await
+            {
+                error!("Error sending mixed sequence: {}", e);
+            }
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
 
     pub async fn mix(&mut self) -> Sequence {
@@ -99,8 +98,7 @@ impl Mixer {
                 (_, 0) => note_a.pitch,
                 (0, _) => note_b.pitch,
                 (_, _) => {
-                    let mixer_ratio =
-                        self.shared_state.read().await.mixer_state.ratio;
+                    let mixer_ratio = self.state.ratio;
                     let r = random::<f32>();
                     if r > mixer_ratio {
                         note_b.pitch
@@ -122,7 +120,6 @@ impl Mixer {
         sequence: Sequence,
     ) -> PolyphonicSequence {
         let mut timed_events: Vec<TimedEvent> = Vec::new();
-        let midi_channel = self.shared_state.read().await.midi_channel;
 
         for (i, note) in sequence.notes.clone().iter().enumerate() {
             if note.pitch != 0 {
@@ -134,7 +131,6 @@ impl Mixer {
                     event: MidiEventType::NoteOn {
                         pitch: note.pitch,
                         velocity: 100u8,
-                        channel: midi_channel,
                     },
                 });
 
@@ -144,7 +140,6 @@ impl Mixer {
                     event: MidiEventType::NoteOn {
                         pitch: note.pitch,
                         velocity: 100u8,
-                        channel: midi_channel,
                     },
                 });
             }

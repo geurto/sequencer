@@ -16,7 +16,7 @@ use sequencer::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    Builder::new().filter(None, log::LevelFilter::Debug).init();
+    Builder::new().filter(None, log::LevelFilter::Info).init();
 
     // sequences FROM sequencers TO mixer
     let (tx_sequence, rx_sequence) =
@@ -34,9 +34,6 @@ async fn main() -> Result<()> {
     let (tx_playback_status, rx_playback_status) =
         mpsc::unbounded_channel::<PlaybackStatus>();
 
-    let shared_state: Arc<RwLock<SharedState>> =
-        Arc::new(RwLock::new(SharedState::new(120.)));
-
     let tx_gui: Arc<
         SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>,
     > = Arc::new(SyncMutex::new(None));
@@ -44,25 +41,29 @@ async fn main() -> Result<()> {
     // Sequencers and mixer
     let mut sequencer_a = EuclideanSequencer::new(
         SequencerSlot::Left,
+        rx_sequencer_a_state,
         tx_sequence.clone(),
-        shared_state.clone(),
     );
     sequencer_a.generate_sequence().await;
     tokio::spawn(async move {
-        sequencer_a.run().await.unwrap();
+        sequencer_a.run().await;
     });
 
     // both Euclidean for now to keep it simple
     let mut sequencer_b = EuclideanSequencer::new(
         SequencerSlot::Right,
+        rx_sequencer_b_state,
         tx_sequence.clone(),
-        shared_state.clone(),
     );
     sequencer_b.generate_sequence().await;
     tokio::spawn(async move { sequencer_b.run().await });
 
-    let mut sequence_mixer =
-        Mixer::new(shared_state.clone(), tx_mixed_sequence, rx_sequence);
+    let mut sequence_mixer = Mixer::new(
+        shared_state.clone(),
+        rx_mixer_state,
+        tx_mixed_sequence,
+        rx_sequence,
+    );
     sequence_mixer.mix().await;
     tokio::spawn(async move { sequence_mixer.run().await });
 
@@ -71,7 +72,6 @@ async fn main() -> Result<()> {
     let midi_conn = midi_utils::create_connection(midi_ports[0].clone())?;
 
     // Link between async GUI and sync playback engine
-    let shared_state_input = shared_state.clone();
     let tx_gui_playback = tx_gui.clone();
     let mut playback_handler = PlaybackHandler::new(
         rx_midi,
@@ -79,7 +79,6 @@ async fn main() -> Result<()> {
         rx_playback_status,
         tx_playback_cmd,
         tx_gui_playback,
-        shared_state_input,
     );
     tokio::spawn(async move { playback_handler.run().await });
 

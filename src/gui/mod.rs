@@ -1,31 +1,22 @@
-use crate::{
-    sequencers::euclidean::gui::{
-        Gui as EuclideanGui, Message as EuclideanGuiMessage,
-    },
-    MidiCommand, SharedState,
-};
+pub mod midi;
+pub mod mixer;
+pub mod sequencers;
+
+use crate::MidiCommand;
 use iced::{
-    border::Radius,
     color,
     futures::{channel::mpsc, SinkExt, Stream},
     stream,
-    widget::{
-        button,
-        button::{Status as ButtonStatus, Style as ButtonStyle},
-        column, container, pick_list, row, text,
-    },
-    widget::{
-        slider::{
-            self, Handle, Rail, Status as SliderStatus, Style as SliderStyle,
-        },
-        Container,
-    },
+    widget::Container,
+    widget::{column, container, row, text},
     Alignment::{Center, Start},
-    Background, Border, Color, Element, Font, Length, Shadow, Subscription,
-    Task, Theme,
+    Color, Element, Font, Length, Subscription, Task, Theme,
 };
 use iced_futures::core::font;
 use log::{error, info, warn};
+use sequencers::euclidean::{
+    Gui as EuclideanGui, Message as EuclideanGuiMessage,
+};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc::Sender, oneshot};
 
@@ -35,6 +26,7 @@ pub enum Message {
     LeftSequencer(EuclideanGuiMessage),
     RightSequencer(EuclideanGuiMessage),
     MixerRatioChanged(f32),
+    NotePlayed(usize),
     RefreshMidiPorts,
     MidiPortsLoaded(Result<Vec<String>, String>),
     MidiPortSelected(String),
@@ -98,10 +90,10 @@ impl Default for CustomTheme {
 pub struct Gui {
     tx_gui: Arc<Mutex<Option<mpsc::Sender<Message>>>>,
     tx_midi: Sender<MidiCommand>,
-    cached_state: Option<SharedState>,
     sequencer_left: EuclideanGui,
     sequencer_right: EuclideanGui,
     mixer_ratio: f32,
+    current_note_index: usize,
     midi_out_ports: Vec<String>,
     selected_midi_port: Option<String>,
     theme: CustomTheme,
@@ -117,10 +109,10 @@ impl Gui {
         Self {
             tx_gui,
             tx_midi,
-            cached_state: None,
             sequencer_left,
             sequencer_right,
             mixer_ratio: 0.5,
+            current_note_index: 0,
             midi_out_ports: vec!["".to_string()],
             selected_midi_port: None,
             theme: CustomTheme::default(),
@@ -140,18 +132,11 @@ impl Gui {
                     }
                 }
                 Event::Disconnected => info!("Sender Disconnected"),
-                Event::StateChanged(state) => {
-                    self.cached_state = Some(state.clone());
-
-                    self.sequencer_left
-                        .update(EuclideanGuiMessage::FromApp(state.clone()));
-                    self.sequencer_right
-                        .update(EuclideanGuiMessage::FromApp(state.clone()));
-                    self.mixer_ratio = state.mixer_state.ratio;
-                }
             },
+            Message::NotePlayed(note) => self.current_note_index = note,
             Message::LeftSequencer(state) => {
-                info!("Left sequencer message in Main GUI update: {:?}", state)
+                self.sequencer_left
+                    .update(EuclideanGuiMessage::UpdateState(state));
             }
             Message::RightSequencer(state) => {
                 info!("Right sequencer message in Main GUI update: {:?}", state)
@@ -311,126 +296,6 @@ impl Gui {
             .into()
     }
 
-    pub fn view_mixer(&self) -> Element<Message> {
-        let theme = &self.theme;
-        let slider = iced::widget::slider(
-            0.0..=1.0,
-            self.mixer_ratio,
-            Message::MixerRatioChanged,
-        )
-        .style(move |_: &iced::Theme, status: SliderStatus| {
-            let handle_color = match status {
-                SliderStatus::Hovered => theme.accent_color,
-                SliderStatus::Dragged => theme.primary_color,
-                SliderStatus::Active => theme.primary_color_muted,
-            };
-
-            let rail_backgrounds = match status {
-                SliderStatus::Hovered => (
-                    Background::Color(theme.primary_color_muted),
-                    Background::Color(theme.surface_color),
-                ),
-                _ => (
-                    Background::Color(theme.overlay_color),
-                    Background::Color(theme.surface_color),
-                ),
-            };
-
-            SliderStyle {
-                rail: Rail {
-                    backgrounds: rail_backgrounds,
-                    width: 5.,
-                    border: Border {
-                        color: theme.accent_color_muted,
-                        width: 2.,
-                        radius: Radius::default(),
-                    },
-                },
-                handle: Handle {
-                    shape: slider::HandleShape::Rectangle {
-                        width: 10,
-                        border_radius: Radius::default(),
-                    },
-                    background: Background::Color(handle_color),
-                    border_width: 2.,
-                    border_color: theme.accent_color,
-                },
-            }
-        });
-        let content = column![
-            text("Mixer")
-                .color(self.theme.primary_text_color)
-                .font(self.theme.bold_font)
-                .size(self.theme.header_text_size),
-            slider,
-        ]
-        .align_x(Center)
-        .spacing(5);
-
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Center)
-            .align_y(Center)
-            .into()
-    }
-
-    pub fn view_midi(&self) -> Element<Message> {
-        let dropdown = pick_list(
-            self.midi_out_ports.clone(),
-            self.selected_midi_port.clone(),
-            Message::MidiPortSelected,
-        )
-        .placeholder("Select MIDI output interface");
-
-        let theme = &self.theme;
-        let button = button("⟳")
-            .on_press(Message::RefreshMidiPorts)
-            .height(25)
-            .width(25)
-            .style(move |_: &iced::Theme, status: ButtonStatus| {
-                let button_color = match status {
-                    ButtonStatus::Hovered => theme.accent_color,
-                    ButtonStatus::Pressed => theme.primary_color,
-                    ButtonStatus::Active => theme.primary_color_muted,
-                    ButtonStatus::Disabled => theme.text_color,
-                };
-
-                ButtonStyle {
-                    background: Some(Background::Color(button_color)),
-                    text_color: self.theme.primary_text_color,
-                    border: Border {
-                        color: button_color,
-                        width: 2.,
-                        radius: Radius {
-                            top_left: 4.,
-                            top_right: 4.,
-                            bottom_left: 4.,
-                            bottom_right: 4.,
-                        },
-                    },
-                    shadow: Shadow::default(),
-                }
-            });
-
-        let content = column![
-            text("MIDI")
-                .color(self.theme.primary_text_color)
-                .font(self.theme.bold_font)
-                .size(self.theme.header_text_size),
-            row![dropdown, button].spacing(10)
-        ]
-        .align_x(Center)
-        .spacing(5);
-
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Center)
-            .align_y(Center)
-            .into()
-    }
-
     pub fn run(
         tx_gui: Arc<Mutex<Option<mpsc::Sender<Message>>>>,
         tx_midi: Sender<MidiCommand>,
@@ -455,7 +320,6 @@ impl Gui {
 pub enum Event {
     Connected(mpsc::Sender<Message>),
     Disconnected,
-    StateChanged(SharedState),
 }
 
 fn poll() -> impl Stream<Item = Event> {

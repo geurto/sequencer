@@ -6,15 +6,8 @@ pub const TICKS_PER_QUARTER_NOTE: u32 = 480;
 // MIDI event to send over midir
 #[derive(Debug, Clone, Copy)]
 pub enum MidiEventType {
-    NoteOn {
-        pitch: u8,
-        velocity: u8,
-        channel: u8,
-    },
-    NoteOff {
-        pitch: u8,
-        channel: u8,
-    },
+    NoteOn { pitch: u8, velocity: u8 },
+    NoteOff { pitch: u8 },
 }
 
 // Link an absolute timestamp to the MIDI event
@@ -33,8 +26,6 @@ pub struct PolyphonicSequence {
 
 // Commands FROM the UI/input TO the playback thread
 pub enum PlaybackCommand {
-    Play,
-    Stop,
     LoadSequence(PolyphonicSequence),
     SetMidiChannel(u8),
     SetBPM(f64),

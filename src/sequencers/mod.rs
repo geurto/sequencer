@@ -1,19 +1,17 @@
 pub mod euclidean;
 
-use anyhow::Error;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 
 pub trait Sequencer {
     fn generate_sequence(
         &self,
     ) -> impl std::future::Future<Output = Sequence> + Send;
-    fn run(
-        &mut self,
-    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
+    fn run(&mut self) -> impl std::future::Future<Output = ()> + Send;
 }
 
 /// NoteDuration is a helper enum to define note durations in musical notation. These durations are
 /// then converted to seconds in playback.
+#[derive(Clone, Copy, Debug)]
 pub enum NoteDuration {
     Sixteenth = 1,
     Eighth = 2,
@@ -25,32 +23,16 @@ pub enum NoteDuration {
     Whole = 16,
 }
 
-/// A Note is a MIDI object with pitch, velocity, duration, and a channel. Duration here is in seconds.
+/// A Note is a MIDI object with pitch, velocity, duration, and a channel.
 #[derive(Clone, Copy, Debug)]
 pub struct Note {
     pub pitch: u8,
     pub velocity: u8,
-    pub duration: f32,
+    pub duration: NoteDuration,
 }
 
 impl Note {
-    pub fn new(
-        pitch: u8,
-        velocity: u8,
-        note_duration: NoteDuration,
-        bpm: f32,
-    ) -> Self {
-        let duration = match note_duration {
-            NoteDuration::Sixteenth => 60000.0 / bpm / 4.0,
-            NoteDuration::Eighth => 60000.0 / bpm / 2.0,
-            NoteDuration::DottedEight => 60000.0 / bpm / 2.0 * 1.5,
-            NoteDuration::Quarter => 60000.0 / bpm,
-            NoteDuration::DottedQuarter => 60000.0 / bpm * 1.5,
-            NoteDuration::Half => 60000.0 / bpm * 2.0,
-            NoteDuration::DottedHalf => 60000.0 / bpm * 2.0 * 1.5,
-            NoteDuration::Whole => 60000.0 / bpm * 4.0,
-        };
-
+    pub fn new(pitch: u8, velocity: u8, duration: NoteDuration) -> Self {
         Note {
             pitch,
             velocity,
@@ -90,40 +72,11 @@ impl Sequence {
 
         note.replace(".", &format!("{octave}"))
     }
-
-    fn duration_to_symbol(duration: f32, total_duration: f32) -> String {
-        let total_dashes = 40;
-        let num_dashes =
-            (duration / total_duration * total_dashes as f32).round() as usize;
-        "-".repeat(num_dashes)
-    }
-}
-
-impl Debug for Sequence {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut result = String::new();
-        result.push_str("Sequence: ");
-        let total_duration =
-            self.notes.iter().map(|note| note.duration).sum::<f32>();
-
-        for note in &self.notes {
-            let note_name = if note.pitch == 0 {
-                "[r]".to_string()
-            } else {
-                format!("[{}]", Sequence::midi_to_note_name(note.pitch))
-            };
-            let duration_symbol =
-                Sequence::duration_to_symbol(note.duration, total_duration);
-            result.push_str(&format!("{note_name}{duration_symbol}"));
-        }
-
-        result.fmt(f)
-    }
 }
 
 impl Default for Sequence {
     fn default() -> Self {
-        let notes = vec![Note::new(0, 0, NoteDuration::Sixteenth, 120.0); 16];
+        let notes = vec![Note::new(0, 0, NoteDuration::Sixteenth); 16];
         Sequence { notes }
     }
 }

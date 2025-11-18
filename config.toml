@@ -1,6 +1,0 @@
-# config.toml
-[bpm]
-default = 120.0
-
-[sequence]
-length = 8
