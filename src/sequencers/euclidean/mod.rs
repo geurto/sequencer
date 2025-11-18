@@ -1,29 +1,31 @@
 pub mod state;
 
+use std::sync::Arc;
+
 use crate::sequencers::euclidean::state::EuclideanSequencerState;
 use crate::sequencers::{Note, NoteDuration, Sequence, Sequencer};
 
-use crate::playback::SequencerSlot;
+use crate::playback::state::{SequencerSlot, SharedState};
 use log::{debug, error};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 
 pub struct EuclideanSequencer {
     sequencer_slot: SequencerSlot,
     state: EuclideanSequencerState,
-    rx_state: mpsc::Receiver<EuclideanSequencerState>,
+    shared_state: Arc<RwLock<SharedState>>,
     tx_sequence: mpsc::Sender<(Option<Sequence>, Option<Sequence>)>,
 }
 
 impl EuclideanSequencer {
     pub fn new(
         sequencer_slot: SequencerSlot,
-        rx_state: mpsc::Receiver<EuclideanSequencerState>,
+        shared_state: Arc<RwLock<SharedState>>,
         tx_sequence: mpsc::Sender<(Option<Sequence>, Option<Sequence>)>,
     ) -> Self {
         EuclideanSequencer {
             sequencer_slot,
             state: EuclideanSequencerState::new(),
-            rx_state,
+            shared_state,
             tx_sequence,
         }
     }
@@ -58,43 +60,46 @@ impl Sequencer for EuclideanSequencer {
     }
 
     async fn run(&mut self) {
-        while let Ok(state) = self.rx_state.try_recv() {
-            if state != self.state {
-                debug!(
-                    "Euclidean sequencer {:?} new state: {:?}",
-                    self.sequencer_slot, state
-                );
-                self.state = state;
-                let sequence = self.generate_sequence().await;
-                {
-                    match self.sequencer_slot {
-                        SequencerSlot::Left => {
-                            debug!(
-                                "Sending {:?} sequence to mixer",
-                                self.sequencer_slot
-                            );
-                            if let Err(e) = self
-                                .tx_sequence
-                                .send((Some(sequence), None))
-                                .await
-                            {
-                                error!("Error sending left Sequence: {e}");
-                            }
-                        }
-                        SequencerSlot::Right => {
-                            if let Err(e) = self
-                                .tx_sequence
-                                .send((None, Some(sequence)))
-                                .await
-                            {
-                                error!("Error sending right Sequence: {e}");
-                            }
-                        }
-                    };
-                }
+        let r_state = match self.sequencer_slot {
+            SequencerSlot::Left => {
+                self.shared_state.read().await.left_sequencer
             }
+            SequencerSlot::Right => {
+                self.shared_state.read().await.right_sequencer
+            }
+        };
+        if r_state != self.state {
+            debug!(
+                "Euclidean sequencer {:?} new state: {:?}",
+                self.sequencer_slot, r_state
+            );
+            self.state = r_state;
 
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            let sequence = self.generate_sequence().await;
+            {
+                match self.sequencer_slot {
+                    SequencerSlot::Left => {
+                        debug!(
+                            "Sending {:?} sequence to mixer",
+                            self.sequencer_slot
+                        );
+                        if let Err(e) =
+                            self.tx_sequence.send((Some(sequence), None)).await
+                        {
+                            error!("Error sending left Sequence: {e}");
+                        }
+                    }
+                    SequencerSlot::Right => {
+                        if let Err(e) =
+                            self.tx_sequence.send((None, Some(sequence))).await
+                        {
+                            error!("Error sending right Sequence: {e}");
+                        }
+                    }
+                };
+            }
         }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
 }

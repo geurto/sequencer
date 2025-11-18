@@ -4,16 +4,15 @@ use std::{
     sync::{mpsc::channel as sync_channel, Arc, Mutex as SyncMutex},
     thread,
 };
-use tokio::signal;
 use tokio::sync::mpsc;
+use tokio::{signal, sync::RwLock};
 
 use sequencer::{
     gui::{sequencers::euclidean::Gui as EuclideanGui, Message as GuiMessage},
     midi_utils,
-    playback::{state::PolyphonicSequence, SequencerSlot},
-    EuclideanSequencer, EuclideanSequencerState, Gui, MidiCommand, Mixer,
-    MixerState, PlaybackEngine, PlaybackHandler, PlaybackStatus, Sequence,
-    Sequencer,
+    playback::state::{PolyphonicSequence, SequencerSlot, SharedState},
+    EuclideanSequencer, Gui, MidiCommand, Mixer, PlaybackEngine,
+    PlaybackHandler, PlaybackStatus, Sequence, Sequencer,
 };
 
 #[tokio::main]
@@ -36,22 +35,19 @@ async fn main() -> Result<()> {
     let (tx_playback_status, rx_playback_status) =
         mpsc::unbounded_channel::<PlaybackStatus>();
 
-    // state updates to sequencers/mixer
-    let (tx_sequencer_a_state, rx_sequencer_a_state) =
-        mpsc::channel::<EuclideanSequencerState>(1);
-    let (tx_sequencer_b_state, rx_sequencer_b_state) =
-        mpsc::channel::<EuclideanSequencerState>(1);
-    let (tx_mixer_state, rx_mixer_state) = mpsc::channel::<MixerState>(1);
-
     // state updates to GUI
     let tx_gui: Arc<
         SyncMutex<Option<iced::futures::channel::mpsc::Sender<GuiMessage>>>,
     > = Arc::new(SyncMutex::new(None));
 
+    // shared state which is read by multiple structs
+    let shared_state: Arc<RwLock<SharedState>> =
+        Arc::new(RwLock::new(SharedState::new(120.)));
+
     // Sequencers and mixer
     let mut sequencer_a = EuclideanSequencer::new(
         SequencerSlot::Left,
-        rx_sequencer_a_state,
+        shared_state.clone(),
         tx_sequence.clone(),
     );
     sequencer_a.generate_sequence().await;
@@ -62,14 +58,14 @@ async fn main() -> Result<()> {
     // both Euclidean for now to keep it simple
     let mut sequencer_b = EuclideanSequencer::new(
         SequencerSlot::Right,
-        rx_sequencer_b_state,
+        shared_state.clone(),
         tx_sequence.clone(),
     );
     sequencer_b.generate_sequence().await;
     tokio::spawn(async move { sequencer_b.run().await });
 
     let mut sequence_mixer =
-        Mixer::new(rx_mixer_state, rx_sequence, tx_mixed_sequence);
+        Mixer::new(shared_state.clone(), rx_sequence, tx_mixed_sequence);
     sequence_mixer.mix().await;
     tokio::spawn(async move { sequence_mixer.run().await });
 
@@ -80,14 +76,12 @@ async fn main() -> Result<()> {
     // Link between async GUI and sync playback engine
     let tx_gui_playback = tx_gui.clone();
     let mut playback_handler = PlaybackHandler::new(
+        shared_state.clone(),
         rx_midi,
         rx_mixed_sequence,
         tx_playback_cmd,
         rx_playback_status,
         tx_gui_playback,
-        tx_sequencer_a_state,
-        tx_sequencer_b_state,
-        tx_mixer_state,
     );
     tokio::spawn(async move { playback_handler.run().await });
 

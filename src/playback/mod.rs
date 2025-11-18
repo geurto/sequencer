@@ -5,35 +5,20 @@ pub mod state;
 use anyhow::Result;
 use device_query::Keycode;
 use log::{error, info, warn};
-use state::{PlaybackCommand, PlaybackStatus, PolyphonicSequence};
-use std::sync::{mpsc::Sender as SyncSender, Arc, Mutex as SyncMutex};
-use tokio::sync::mpsc;
+use std::{
+    sync::{mpsc::Sender as SyncSender, Arc, Mutex as SyncMutex},
+    time::Duration,
+};
+use tokio::sync::{mpsc, RwLock};
 
-use crate::{
-    gui::{
-        sequencers::euclidean::Message as EuclideanGuiMessage,
-        Message as GuiMessage,
-    },
-    midi_utils, EuclideanSequencerState, MidiCommand, MixerState,
+use crate::{gui::Message as GuiMessage, midi_utils, MidiCommand};
+use state::{
+    PlaybackCommand, PlaybackStatus, PolyphonicSequence, SequencerSlot,
+    SharedState,
 };
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum SequencerSlot {
-    #[default]
-    Left,
-    Right,
-}
-
 pub struct PlaybackHandler {
-    is_playing: bool,
-    midi_channel: u8,
-    bpm: f32,
-    current_note_index: usize,
-    active_sequencer: SequencerSlot,
-
-    left_sequencer: EuclideanSequencerState,
-    right_sequencer: EuclideanSequencerState,
-    mixer: MixerState,
+    state: Arc<RwLock<SharedState>>,
 
     rx_midi: mpsc::Receiver<MidiCommand>,
     rx_sequence: mpsc::Receiver<PolyphonicSequence>,
@@ -42,14 +27,11 @@ pub struct PlaybackHandler {
     tx_gui: Arc<
         SyncMutex<Option<iced::futures::channel::mpsc::Sender<GuiMessage>>>,
     >,
-
-    tx_sequencer_a_state: mpsc::Sender<EuclideanSequencerState>,
-    tx_sequencer_b_state: mpsc::Sender<EuclideanSequencerState>,
-    tx_mixer_state: mpsc::Sender<MixerState>,
 }
 
 impl PlaybackHandler {
     pub fn new(
+        state: Arc<RwLock<SharedState>>,
         rx_midi: mpsc::Receiver<MidiCommand>,
         rx_sequence: mpsc::Receiver<PolyphonicSequence>,
         tx_engine: SyncSender<PlaybackCommand>,
@@ -57,31 +39,14 @@ impl PlaybackHandler {
         tx_gui: Arc<
             SyncMutex<Option<iced::futures::channel::mpsc::Sender<GuiMessage>>>,
         >,
-
-        tx_sequencer_a_state: mpsc::Sender<EuclideanSequencerState>,
-        tx_sequencer_b_state: mpsc::Sender<EuclideanSequencerState>,
-        tx_mixer_state: mpsc::Sender<MixerState>,
     ) -> Self {
         Self {
-            is_playing: false,
-            midi_channel: 0,
-            bpm: 120.0,
-            current_note_index: 0,
-            active_sequencer: SequencerSlot::Left,
-
-            left_sequencer: EuclideanSequencerState::default(),
-            right_sequencer: EuclideanSequencerState::default(),
-            mixer: MixerState::default(),
-
+            state,
             rx_midi,
             rx_sequence,
             tx_engine,
             rx_engine_status,
             tx_gui,
-
-            tx_sequencer_a_state,
-            tx_sequencer_b_state,
-            tx_mixer_state,
         }
     }
 
@@ -91,7 +56,11 @@ impl PlaybackHandler {
             while let Ok(status) = self.rx_engine_status.try_recv() {
                 match status {
                     PlaybackStatus::NotePlayed(i) => {
-                        self.current_note_index = i;
+                        {
+                            let mut w_state = self.state.write().await;
+                            w_state.current_note_index = i;
+                            drop(w_state);
+                        }
                         self.update_gui(GuiMessage::NotePlayed(i)).await;
                     }
                     PlaybackStatus::InputChanged(input) => {
@@ -149,115 +118,107 @@ impl PlaybackHandler {
     }
 
     pub async fn handle_input_change(&mut self, diff: Vec<Keycode>) {
-        let cached_state_left_sequencer = self.left_sequencer.clone();
-        let cached_state_right_sequencer = self.right_sequencer.clone();
-        let cached_state_mixer = self.mixer.clone();
+        let mut w_state = self.state.write().await;
 
         for key in diff {
             match key {
                 Keycode::Space => {
-                    match self.is_playing {
+                    match w_state.is_playing {
                         true => info!("Paused playback!"),
                         false => info!("Resumed playback!"),
                     };
-                    self.is_playing = !self.is_playing
+                    w_state.is_playing = !w_state.is_playing
                 }
                 Keycode::C => {
-                    self.midi_channel = (self.midi_channel + 1) % 16;
-                    info!("Changing MIDI channel to {}", self.midi_channel + 1);
+                    w_state.midi_channel = (w_state.midi_channel + 1) % 16;
+                    info!(
+                        "Changing MIDI channel to {}",
+                        w_state.midi_channel + 1
+                    );
                 }
                 Keycode::R => {
-                    self.mixer.increase_ratio();
+                    w_state.mixer.increase_ratio();
                 }
                 Keycode::F => {
-                    self.mixer.decrease_ratio();
+                    w_state.mixer.decrease_ratio();
                 }
-                Keycode::Up => match self.active_sequencer {
+                Keycode::Up => match w_state.active_sequencer {
                     SequencerSlot::Left => {
-                        self.left_sequencer.increase_steps();
+                        w_state.left_sequencer.increase_steps();
                     }
                     SequencerSlot::Right => {
-                        self.right_sequencer.increase_steps()
+                        w_state.right_sequencer.increase_steps()
                     }
                 },
-                Keycode::Down => match self.active_sequencer {
-                    SequencerSlot::Left => self.left_sequencer.decrease_steps(),
-                    SequencerSlot::Right => {
-                        self.right_sequencer.decrease_steps()
-                    }
-                },
-                Keycode::Right => match self.active_sequencer {
+                Keycode::Down => match w_state.active_sequencer {
                     SequencerSlot::Left => {
-                        self.left_sequencer.increase_pulses()
+                        w_state.left_sequencer.decrease_steps()
                     }
                     SequencerSlot::Right => {
-                        self.right_sequencer.increase_pulses()
+                        w_state.right_sequencer.decrease_steps()
                     }
                 },
-                Keycode::Left => match self.active_sequencer {
+                Keycode::Right => match w_state.active_sequencer {
                     SequencerSlot::Left => {
-                        self.left_sequencer.decrease_pulses()
+                        w_state.left_sequencer.increase_pulses()
                     }
                     SequencerSlot::Right => {
-                        self.right_sequencer.decrease_pulses()
+                        w_state.right_sequencer.increase_pulses()
                     }
                 },
-                Keycode::W => match self.active_sequencer {
-                    SequencerSlot::Left => self.left_sequencer.change_pitch(1),
-                    SequencerSlot::Right => {
-                        self.right_sequencer.change_pitch(1)
-                    }
-                },
-                Keycode::S => match self.active_sequencer {
-                    SequencerSlot::Left => self.left_sequencer.change_pitch(-1),
-                    SequencerSlot::Right => {
-                        self.right_sequencer.change_pitch(-1)
-                    }
-                },
-                Keycode::D => match self.active_sequencer {
-                    SequencerSlot::Left => self.left_sequencer.change_pitch(12),
-                    SequencerSlot::Right => {
-                        self.right_sequencer.change_pitch(12)
-                    }
-                },
-                Keycode::A => match self.active_sequencer {
+                Keycode::Left => match w_state.active_sequencer {
                     SequencerSlot::Left => {
-                        self.left_sequencer.change_pitch(-12)
+                        w_state.left_sequencer.decrease_pulses()
                     }
                     SequencerSlot::Right => {
-                        self.right_sequencer.change_pitch(-12)
+                        w_state.right_sequencer.decrease_pulses()
                     }
                 },
-                Keycode::Tab => match self.active_sequencer {
+                Keycode::W => match w_state.active_sequencer {
                     SequencerSlot::Left => {
-                        self.active_sequencer = SequencerSlot::Right
+                        w_state.left_sequencer.change_pitch(1)
                     }
                     SequencerSlot::Right => {
-                        self.active_sequencer = SequencerSlot::Left
+                        w_state.right_sequencer.change_pitch(1)
+                    }
+                },
+                Keycode::S => match w_state.active_sequencer {
+                    SequencerSlot::Left => {
+                        w_state.left_sequencer.change_pitch(-1)
+                    }
+                    SequencerSlot::Right => {
+                        w_state.right_sequencer.change_pitch(-1)
+                    }
+                },
+                Keycode::D => match w_state.active_sequencer {
+                    SequencerSlot::Left => {
+                        w_state.left_sequencer.change_pitch(12)
+                    }
+                    SequencerSlot::Right => {
+                        w_state.right_sequencer.change_pitch(12)
+                    }
+                },
+                Keycode::A => match w_state.active_sequencer {
+                    SequencerSlot::Left => {
+                        w_state.left_sequencer.change_pitch(-12)
+                    }
+                    SequencerSlot::Right => {
+                        w_state.right_sequencer.change_pitch(-12)
+                    }
+                },
+                Keycode::Tab => match w_state.active_sequencer {
+                    SequencerSlot::Left => {
+                        w_state.active_sequencer = SequencerSlot::Right
+                    }
+                    SequencerSlot::Right => {
+                        w_state.active_sequencer = SequencerSlot::Left
                     }
                 },
                 _ => {}
             };
         }
-
-        if self.left_sequencer != cached_state_left_sequencer {
-            self.update_gui(GuiMessage::LeftSequencer(
-                EuclideanGuiMessage::UpdateState(self.left_sequencer),
-            ))
-            .await;
-        }
-
-        if self.right_sequencer != cached_state_right_sequencer {
-            self.update_gui(GuiMessage::LeftSequencer(
-                EuclideanGuiMessage::UpdateState(self.right_sequencer),
-            ))
-            .await;
-        }
-
-        if self.mixer != cached_state_mixer {
-            self.update_gui(GuiMessage::MixerRatioChanged(self.mixer.ratio))
-                .await;
-        }
+        drop(w_state);
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
     pub async fn update_gui(&self, message: GuiMessage) {

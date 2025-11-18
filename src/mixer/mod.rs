@@ -2,46 +2,46 @@ pub mod state;
 
 use crate::{
     playback::state::{
-        MidiEventType, PolyphonicSequence, TimedEvent, TICKS_PER_QUARTER_NOTE,
+        MidiEventType, PolyphonicSequence, SharedState, TimedEvent,
+        TICKS_PER_QUARTER_NOTE,
     },
     MixerState, Sequence,
 };
 use log::{debug, error, info};
 use num::integer;
 use rand::random;
-use std::cmp::max;
-use tokio::sync::mpsc;
+use std::{cmp::max, sync::Arc};
+use tokio::sync::{mpsc, RwLock};
 
 pub struct Mixer {
     state: MixerState,
     sequences: (Sequence, Sequence),
-    rx_state: mpsc::Receiver<MixerState>,
+    shared_state: Arc<RwLock<SharedState>>,
     rx_sequence: mpsc::Receiver<(Option<Sequence>, Option<Sequence>)>,
     tx_polyphonic_sequence: mpsc::Sender<PolyphonicSequence>,
 }
 
 impl Mixer {
     pub fn new(
-        rx_state: mpsc::Receiver<MixerState>,
+        shared_state: Arc<RwLock<SharedState>>,
         rx_sequence: mpsc::Receiver<(Option<Sequence>, Option<Sequence>)>,
         tx_polyphonic_sequence: mpsc::Sender<PolyphonicSequence>,
     ) -> Self {
         Mixer {
             state: MixerState::default(),
             sequences: (Sequence::default(), Sequence::default()),
-            rx_state,
+            shared_state,
             rx_sequence,
             tx_polyphonic_sequence,
         }
     }
 
     pub async fn run(&mut self) {
-        while let Ok(state) = self.rx_state.try_recv() {
-            if state != self.state {
-                debug!("Mixer received update request");
-                self.state = state.clone();
-                self.mix().await;
-            }
+        let r_state = self.shared_state.read().await.mixer;
+        if r_state != self.state {
+            debug!("Mixer received update request");
+            self.state = r_state;
+            self.mix().await;
         }
 
         while let Ok(sequences) = self.rx_sequence.try_recv() {

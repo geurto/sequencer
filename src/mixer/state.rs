@@ -5,7 +5,7 @@ pub enum MixerInput {
     DecreaseRatio,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MixerState {
     pub ratio: f32,
 }

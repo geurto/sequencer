@@ -10,7 +10,7 @@ use iced::{
 };
 
 use crate::{
-    gui::CustomTheme, playback::SequencerSlot, EuclideanSequencerState,
+    gui::CustomTheme, playback::state::SequencerSlot, EuclideanSequencerState,
     Sequence,
 };
 
@@ -31,12 +31,7 @@ pub struct Gui {
 
 impl Gui {
     pub fn new(slot: SequencerSlot) -> Self {
-        let active_sequencer: bool = if slot == SequencerSlot::Left {
-            true
-        } else {
-            false
-        };
-
+        let active_sequencer: bool = slot == SequencerSlot::Left;
         Self {
             state: EuclideanSequencerState::default(),
             active_sequencer,
