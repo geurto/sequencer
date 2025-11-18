@@ -3,7 +3,7 @@ pub mod state;
 use crate::sequencers::euclidean::state::EuclideanSequencerState;
 use crate::sequencers::{Note, NoteDuration, Sequence, Sequencer};
 
-use crate::state::SequencerSlot;
+use crate::playback::SequencerSlot;
 use log::{debug, error};
 use tokio::sync::mpsc;
 

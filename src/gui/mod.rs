@@ -135,11 +135,10 @@ impl Gui {
             },
             Message::NotePlayed(note) => self.current_note_index = note,
             Message::LeftSequencer(state) => {
-                self.sequencer_left
-                    .update(EuclideanGuiMessage::UpdateState(state));
+                self.sequencer_left.update(state);
             }
             Message::RightSequencer(state) => {
-                info!("Right sequencer message in Main GUI update: {:?}", state)
+                self.sequencer_right.update(state);
             }
             Message::MixerRatioChanged(ratio) => {
                 self.mixer_ratio = ratio;

@@ -5,13 +5,15 @@ use std::{
     thread,
 };
 use tokio::signal;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 
 use sequencer::{
-    gui::Message, midi_utils, playback::state::PolyphonicSequence,
-    sequencers::euclidean::gui::Gui as EuclideanGui, state::SequencerSlot,
-    EuclideanSequencer, Gui, MidiCommand, Mixer, PlaybackEngine,
-    PlaybackHandler, PlaybackStatus, Sequence, Sequencer, SharedState,
+    gui::{sequencers::euclidean::Gui as EuclideanGui, Message as GuiMessage},
+    midi_utils,
+    playback::{state::PolyphonicSequence, SequencerSlot},
+    EuclideanSequencer, EuclideanSequencerState, Gui, MidiCommand, Mixer,
+    MixerState, PlaybackEngine, PlaybackHandler, PlaybackStatus, Sequence,
+    Sequencer,
 };
 
 #[tokio::main]
@@ -34,8 +36,16 @@ async fn main() -> Result<()> {
     let (tx_playback_status, rx_playback_status) =
         mpsc::unbounded_channel::<PlaybackStatus>();
 
+    // state updates to sequencers/mixer
+    let (tx_sequencer_a_state, rx_sequencer_a_state) =
+        mpsc::channel::<EuclideanSequencerState>(1);
+    let (tx_sequencer_b_state, rx_sequencer_b_state) =
+        mpsc::channel::<EuclideanSequencerState>(1);
+    let (tx_mixer_state, rx_mixer_state) = mpsc::channel::<MixerState>(1);
+
+    // state updates to GUI
     let tx_gui: Arc<
-        SyncMutex<Option<iced::futures::channel::mpsc::Sender<Message>>>,
+        SyncMutex<Option<iced::futures::channel::mpsc::Sender<GuiMessage>>>,
     > = Arc::new(SyncMutex::new(None));
 
     // Sequencers and mixer
@@ -58,12 +68,8 @@ async fn main() -> Result<()> {
     sequencer_b.generate_sequence().await;
     tokio::spawn(async move { sequencer_b.run().await });
 
-    let mut sequence_mixer = Mixer::new(
-        shared_state.clone(),
-        rx_mixer_state,
-        tx_mixed_sequence,
-        rx_sequence,
-    );
+    let mut sequence_mixer =
+        Mixer::new(rx_mixer_state, rx_sequence, tx_mixed_sequence);
     sequence_mixer.mix().await;
     tokio::spawn(async move { sequence_mixer.run().await });
 
@@ -76,9 +82,12 @@ async fn main() -> Result<()> {
     let mut playback_handler = PlaybackHandler::new(
         rx_midi,
         rx_mixed_sequence,
-        rx_playback_status,
         tx_playback_cmd,
+        rx_playback_status,
         tx_gui_playback,
+        tx_sequencer_a_state,
+        tx_sequencer_b_state,
+        tx_mixer_state,
     );
     tokio::spawn(async move { playback_handler.run().await });
 

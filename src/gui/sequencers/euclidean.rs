@@ -10,7 +10,8 @@ use iced::{
 };
 
 use crate::{
-    gui::CustomTheme, state::SequencerSlot, EuclideanSequencerState, Sequence,
+    gui::CustomTheme, playback::SequencerSlot, EuclideanSequencerState,
+    Sequence,
 };
 
 #[derive(Debug, Clone)]

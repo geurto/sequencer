@@ -22,13 +22,12 @@ pub struct Mixer {
 
 impl Mixer {
     pub fn new(
-        state: MixerState,
         rx_state: mpsc::Receiver<MixerState>,
         rx_sequence: mpsc::Receiver<(Option<Sequence>, Option<Sequence>)>,
         tx_polyphonic_sequence: mpsc::Sender<PolyphonicSequence>,
     ) -> Self {
         Mixer {
-            state,
+            state: MixerState::default(),
             sequences: (Sequence::default(), Sequence::default()),
             rx_state,
             rx_sequence,
