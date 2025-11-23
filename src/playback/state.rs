@@ -23,10 +23,19 @@ pub struct TimedEvent {
 }
 
 // Sequence is just a collection of timed events
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PolyphonicSequence {
     pub events: Vec<TimedEvent>, // sort this by tick
     pub total_ticks: u32,
+}
+
+impl Default for PolyphonicSequence {
+    fn default() -> Self {
+        Self {
+            events: Vec::new(),
+            total_ticks: 4u32 * TICKS_PER_QUARTER_NOTE,
+        }
+    }
 }
 
 // Commands FROM the UI/input TO the playback thread

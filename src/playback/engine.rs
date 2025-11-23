@@ -68,6 +68,15 @@ impl PlaybackEngine {
                             "Engine received new sequence of length {}",
                             seq.events.len()
                         );
+
+                        // Update current_tick, next_event_index, next_note_tick
+                        // based on new sequence length
+                        let length_ratio =
+                            seq.total_ticks / self.sequence.total_ticks;
+                        self.current_tick *= length_ratio as f64;
+                        self.next_event_index *= length_ratio as usize;
+                        self.next_note_tick *= length_ratio as f64;
+
                         self.sequence = seq;
                     }
                     PlaybackCommand::SetMidiChannel(channel) => {
@@ -138,6 +147,7 @@ impl PlaybackEngine {
                 if self.current_tick >= self.sequence.total_ticks as f64 {
                     self.current_tick -= self.sequence.total_ticks as f64;
                     self.next_event_index = 0;
+                    self.next_note_tick -= self.sequence.total_ticks as f64;
                 }
 
                 if !self.sequence.events.is_empty() {

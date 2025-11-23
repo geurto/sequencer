@@ -9,7 +9,7 @@ use crate::{
 };
 use log::{debug, error, info};
 use num::integer;
-use rand::random;
+use rand::{random, random_range};
 use std::{cmp::max, sync::Arc};
 use tokio::sync::{mpsc, RwLock};
 
@@ -58,11 +58,8 @@ impl Mixer {
                     (None, None) => {}
                 }
                 let mixed_sequence = self.mix().await;
-                let polyphonic_sequence =
-                    self.make_polyphonic_sequence(mixed_sequence).await;
-
                 if let Err(e) =
-                    self.tx_polyphonic_sequence.send(polyphonic_sequence).await
+                    self.tx_polyphonic_sequence.send(mixed_sequence).await
                 {
                     error!("Error sending mixed sequence: {}", e);
                 }
@@ -72,7 +69,8 @@ impl Mixer {
         }
     }
 
-    pub async fn mix(&mut self) -> Sequence {
+    // TODO this can actually be polyphonic now
+    pub async fn mix(&mut self) -> PolyphonicSequence {
         // Determine resulting sequence length
         let len_a = self.sequences.0.notes.len();
         let len_b = self.sequences.1.notes.len();
@@ -89,68 +87,111 @@ impl Mixer {
             integer::lcm(len_a, len_b)
         };
 
-        let mut mixed_sequence = Sequence::empty();
+        let mut timed_events: Vec<TimedEvent> = Vec::new();
         for i in 0..sequence_length {
+            let tick_position = i as u32 * TICKS_PER_QUARTER_NOTE / 4;
+
             let note_a = self.sequences.0.notes[i % len_a];
             let note_b = self.sequences.1.notes[i % len_b];
             let mut mixed_note = note_a;
-            mixed_note.pitch = match (note_a.pitch, note_b.pitch) {
-                (0, 0) => 0,
-                (_, 0) => note_a.pitch,
-                (0, _) => note_b.pitch,
+
+            match (note_a.pitch, note_b.pitch) {
+                (0, 0) => {}
+                (_, 0) => {
+                    self.add_note_on(
+                        note_a.pitch,
+                        100u8,
+                        tick_position,
+                        &mut timed_events,
+                    );
+                    self.add_note_off(
+                        note_a.pitch,
+                        tick_position + TICKS_PER_QUARTER_NOTE / 4 - 1,
+                        &mut timed_events,
+                    );
+                }
+                (0, _) => {
+                    self.add_note_on(
+                        note_a.pitch,
+                        100u8,
+                        tick_position,
+                        &mut timed_events,
+                    );
+                    self.add_note_off(
+                        note_a.pitch,
+                        tick_position + TICKS_PER_QUARTER_NOTE / 4 - 1,
+                        &mut timed_events,
+                    );
+                }
                 (_, _) => {
                     let mixer_ratio = self.state.ratio;
-                    let r = random::<f32>();
-                    if r > mixer_ratio {
-                        note_b.pitch
-                    } else {
-                        note_a.pitch
+                    let dominant_note =
+                        if mixer_ratio > 0.5 { note_b } else { note_a };
+                    let accent_note =
+                        if mixer_ratio > 0.5 { note_a } else { note_b };
+
+                    if num::abs_sub(mixer_ratio, 0.5) < 0.2 {
+                        let dominant_velocity: u8 = random_range(60..=80);
+                        let accent_velocity: u8 = random_range(40..=60);
+                        self.add_note_on(
+                            dominant_note.pitch,
+                            dominant_velocity,
+                            tick_position,
+                            &mut timed_events,
+                        );
+                        self.add_note_on(
+                            accent_note.pitch,
+                            accent_velocity,
+                            tick_position,
+                            &mut timed_events,
+                        );
+
+                        self.add_note_off(
+                            dominant_note.pitch,
+                            tick_position + TICKS_PER_QUARTER_NOTE / 4 - 1,
+                            &mut timed_events,
+                        );
+                        self.add_note_off(
+                            accent_note.pitch,
+                            tick_position + TICKS_PER_QUARTER_NOTE / 4 - 1,
+                            &mut timed_events,
+                        );
                     }
                 }
-            };
-            mixed_sequence.notes.push(mixed_note);
+            }
         }
         info!("Created sequence with {} notes from sequences with length {} and {} (common factor {})", sequence_length, len_a, len_b, common_factor);
 
-        mixed_sequence
-    }
-
-    // This currently assumes only 16th notes are played.
-    async fn make_polyphonic_sequence(
-        &self,
-        sequence: Sequence,
-    ) -> PolyphonicSequence {
-        let mut timed_events: Vec<TimedEvent> = Vec::new();
-
-        for (i, note) in sequence.notes.clone().iter().enumerate() {
-            if note.pitch != 0 {
-                let tick_position = i as u32 * TICKS_PER_QUARTER_NOTE / 4;
-
-                // ON event
-                timed_events.push(TimedEvent {
-                    tick: tick_position,
-                    event: MidiEventType::NoteOn {
-                        pitch: note.pitch,
-                        velocity: 100u8,
-                    },
-                });
-
-                // OFF event
-                timed_events.push(TimedEvent {
-                    tick: tick_position + TICKS_PER_QUARTER_NOTE / 4 - 1,
-                    event: MidiEventType::NoteOn {
-                        pitch: note.pitch,
-                        velocity: 100u8,
-                    },
-                });
-            }
-        }
-
         PolyphonicSequence {
             events: timed_events,
-            total_ticks: sequence.notes.len() as u32
-                * TICKS_PER_QUARTER_NOTE
-                * 4u32,
+            total_ticks: sequence_length as u32 * TICKS_PER_QUARTER_NOTE / 4u32,
         }
+    }
+
+    fn add_note_on(
+        &self,
+        pitch: u8,
+        velocity: u8,
+        tick_position: u32,
+        timed_events: &mut Vec<TimedEvent>,
+    ) {
+        // ON event
+        timed_events.push(TimedEvent {
+            tick: tick_position,
+            event: MidiEventType::NoteOn { pitch, velocity },
+        });
+    }
+
+    fn add_note_off(
+        &self,
+        pitch: u8,
+        tick_position: u32,
+        timed_events: &mut Vec<TimedEvent>,
+    ) {
+        // OFF event
+        timed_events.push(TimedEvent {
+            tick: tick_position + TICKS_PER_QUARTER_NOTE / 4 - 1,
+            event: MidiEventType::NoteOff { pitch },
+        });
     }
 }
