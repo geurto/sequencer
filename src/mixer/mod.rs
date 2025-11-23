@@ -9,7 +9,7 @@ use crate::{
 };
 use log::{debug, error, info};
 use num::integer;
-use rand::{random, random_range};
+use rand::random_range;
 use std::{cmp::max, sync::Arc};
 use tokio::sync::{mpsc, RwLock};
 
@@ -93,7 +93,6 @@ impl Mixer {
 
             let note_a = self.sequences.0.notes[i % len_a];
             let note_b = self.sequences.1.notes[i % len_b];
-            let mut mixed_note = note_a;
 
             match (note_a.pitch, note_b.pitch) {
                 (0, 0) => {}
@@ -112,13 +111,13 @@ impl Mixer {
                 }
                 (0, _) => {
                     self.add_note_on(
-                        note_a.pitch,
+                        note_b.pitch,
                         100u8,
                         tick_position,
                         &mut timed_events,
                     );
                     self.add_note_off(
-                        note_a.pitch,
+                        note_b.pitch,
                         tick_position + TICKS_PER_QUARTER_NOTE / 4 - 1,
                         &mut timed_events,
                     );
