@@ -69,13 +69,36 @@ impl PlaybackEngine {
                             seq.events.len()
                         );
 
-                        // Update current_tick, next_event_index, next_note_tick
-                        // based on new sequence length
-                        let length_ratio =
-                            seq.total_ticks / self.sequence.total_ticks;
-                        self.current_tick *= length_ratio as f64;
-                        self.next_event_index *= length_ratio as usize;
-                        self.next_note_tick *= length_ratio as f64;
+                        self.all_notes_off();
+
+                        if self.sequence.total_ticks > 0 && seq.total_ticks > 0
+                        {
+                            let length_ratio = seq.total_ticks as f64
+                                / self.sequence.total_ticks as f64;
+
+                            self.current_tick *= length_ratio;
+                            self.next_event_index = 0;
+                            while let Some(event) =
+                                seq.events.get(self.next_event_index)
+                            {
+                                if (event.tick as f64) < self.current_tick {
+                                    // Changed to strictly less than for safety
+                                    self.next_event_index += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                            let ticks_per_16th =
+                                TICKS_PER_QUARTER_NOTE as f64 / 4.0;
+                            let current_16th_index =
+                                (self.current_tick / ticks_per_16th).ceil();
+                            self.next_note_tick =
+                                current_16th_index * ticks_per_16th;
+                        } else {
+                            self.current_tick = 0.0;
+                            self.next_event_index = 0;
+                            self.next_note_tick = 0.0;
+                        }
 
                         self.sequence = seq;
                     }
@@ -185,5 +208,19 @@ impl PlaybackEngine {
         self.midi_conn
             .send(&message)
             .unwrap_or_else(|e| log::error!("MIDI send error: {}", e));
+    }
+
+    fn all_notes_off(&mut self) {
+        const CC: u8 = 0xB0;
+        const ALL_NOTES_OFF: u8 = 123;
+
+        let _ =
+            self.midi_conn
+                .send(&[CC | self.midi_channel, ALL_NOTES_OFF, 0]);
+
+        const ALL_SOUND_OFF: u8 = 120;
+        let _ =
+            self.midi_conn
+                .send(&[CC | self.midi_channel, ALL_SOUND_OFF, 0]);
     }
 }
