@@ -6,7 +6,7 @@ use crate::sequencers::euclidean::state::EuclideanSequencerState;
 use crate::sequencers::{Note, NoteDuration, Sequence, Sequencer};
 
 use crate::playback::state::{SequencerSlot, SharedState};
-use log::{debug, error};
+use log::{debug, error, info};
 use tokio::sync::{mpsc, RwLock};
 
 pub struct EuclideanSequencer {
@@ -32,7 +32,7 @@ impl EuclideanSequencer {
 }
 
 impl Sequencer for EuclideanSequencer {
-    async fn generate_sequence(&self) -> Sequence {
+    fn generate_sequence(&self) -> Sequence {
         if self.state.pulses == 0 {
             // Handle zero pulses case
             let note = Note::new(0, 0, NoteDuration::Sixteenth);
@@ -45,7 +45,10 @@ impl Sequencer for EuclideanSequencer {
 
         // Bresenham line algorithm cus it looks easier
         let beat_locations = (0..self.state.pulses)
-            .map(|i| (i * self.state.steps) / self.state.pulses)
+            .map(|i| {
+                (self.state.phase + (i * self.state.steps) / self.state.pulses)
+                    % self.state.steps
+            })
             .collect::<Vec<_>>();
 
         for i in 0..self.state.steps {
@@ -76,7 +79,7 @@ impl Sequencer for EuclideanSequencer {
                 );
                 self.state = r_state;
 
-                let sequence = self.generate_sequence().await;
+                let sequence = self.generate_sequence();
                 {
                     match self.sequencer_slot {
                         SequencerSlot::Left => {

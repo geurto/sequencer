@@ -65,7 +65,7 @@ impl EuclideanSequencerState {
     }
 
     pub fn decrease_phase(&mut self) {
-        self.phase = (self.phase - 1) % self.steps;
+        self.phase = self.phase.saturating_sub(1) % self.steps;
         info!("Phase: {}", self.phase);
     }
 

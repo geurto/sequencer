@@ -90,7 +90,10 @@ impl canvas::Program<Message> for Gui {
         let start_y = center.y - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
 
         let beat_locations = (0..self.state.pulses)
-            .map(|i| (i * self.state.steps) / self.state.pulses)
+            .map(|i| {
+                (self.state.phase + (i * self.state.steps) / self.state.pulses)
+                    % self.state.steps
+            })
             .collect::<Vec<_>>();
 
         for row in 0..4 {

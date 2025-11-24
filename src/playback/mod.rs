@@ -175,6 +175,22 @@ impl PlaybackHandler {
                         w_state.right_sequencer.decrease_pulses()
                     }
                 },
+                Keycode::RightBracket => match w_state.active_sequencer {
+                    SequencerSlot::Left => {
+                        w_state.left_sequencer.increase_phase()
+                    }
+                    SequencerSlot::Right => {
+                        w_state.right_sequencer.increase_phase()
+                    }
+                },
+                Keycode::LeftBracket => match w_state.active_sequencer {
+                    SequencerSlot::Left => {
+                        w_state.left_sequencer.decrease_phase()
+                    }
+                    SequencerSlot::Right => {
+                        w_state.right_sequencer.decrease_phase()
+                    }
+                },
                 Keycode::W => match w_state.active_sequencer {
                     SequencerSlot::Left => {
                         w_state.left_sequencer.change_pitch(1)

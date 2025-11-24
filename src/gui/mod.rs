@@ -200,7 +200,7 @@ impl Gui {
                 .color(self.theme.secondary_text_color)
                 .font(self.theme.bold_font)
                 .size(self.theme.header_text_size),
-            text("Up / Down: increase / decrease steps\nRight / Left: increase / decrease pulses")
+            text("Up / Down: increase / decrease steps\nRight / Left: increase / decrease pulses\n] / [: increase / decrease phase")
                 .color(self.theme.text_color)
                 .size(self.theme.text_size),
             text("Mixer")

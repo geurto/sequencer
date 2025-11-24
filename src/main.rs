@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
         shared_state.clone(),
         tx_sequence.clone(),
     );
-    sequencer_a.generate_sequence().await;
+    sequencer_a.generate_sequence();
     tokio::spawn(async move {
         sequencer_a.run().await;
     });
@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
         shared_state.clone(),
         tx_sequence.clone(),
     );
-    sequencer_b.generate_sequence().await;
+    sequencer_b.generate_sequence();
     tokio::spawn(async move { sequencer_b.run().await });
 
     let mut sequence_mixer =

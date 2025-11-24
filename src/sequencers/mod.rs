@@ -3,9 +3,7 @@ pub mod euclidean;
 use std::fmt::Debug;
 
 pub trait Sequencer {
-    fn generate_sequence(
-        &self,
-    ) -> impl std::future::Future<Output = Sequence> + Send;
+    fn generate_sequence(&self) -> Sequence;
     fn run(&mut self) -> impl std::future::Future<Output = ()> + Send;
 }
 
