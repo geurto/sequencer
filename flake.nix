@@ -60,7 +60,8 @@
             pkgs.cargo-watch
             pkgs.rust-analyzer
 
-          ] ++ nativeDeps;
+          ]
+          ++ nativeDeps;
 
           shellHook = ''
             # Set RUST_SRC_PATH for rust-analyzer to find standard library sources
@@ -71,6 +72,11 @@
 
             # This one is needed so that libxkbcommon-x11.so is linked correctly
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath nativeDeps}:$LD_LIBRARY_PATH"
+
+            # libglvnd (libEGL.so) finds the actual mesa driver via JSON ICD files,
+            # not LD_LIBRARY_PATH — these paths don't exist in the standard locations on Nix
+            export __EGL_VENDOR_LIBRARY_FILENAMES="${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json"
+            export LIBGL_DRIVERS_PATH="${pkgs.mesa}/lib/dri"
           '';
 
           PKG_CONFIG_PATH = pkgs.lib.makeSearchPathOutput "lib" "pkgconfig" [
