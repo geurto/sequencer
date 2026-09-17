@@ -10,12 +10,13 @@ recommendations but is referenced where it constrains the architecture.
 
 > ### ⚠️ Implementation status — read this first
 >
-> **Roadmap steps 1 and 2 have been implemented** — §A1 bugs, §A5 manifest, §A6 tooling, and §A7
-> testability. Those sections describe the code *as audited*, and are kept because they explain why
-> each fix looks the way it does — but they no longer describe the current tree. Do not re-fix them.
+> **Roadmap steps 1, 2 and 3 have been implemented** — §A1 bugs, §A5 manifest, §A6 tooling, §A7
+> testability, and §A4 edition 2024. Those sections describe the code *as audited*, and are kept
+> because they explain why each fix looks the way it does — but they no longer describe the current
+> tree. Do not re-fix them.
 >
-> Still outstanding and unchanged: **§A2** (concurrency model), **§A3** (platform coupling),
-> **§A4** (edition 2024), and all of **Part B** and **Part C**. Those are the live work items.
+> Still outstanding and unchanged: **§A2** (concurrency model), **§A3** (platform coupling), and all
+> of **Part B** and **Part C**. Those are the live work items.
 >
 > Step 1 landed the three mixer bugs, the silent-startup bug, the A1.5 list, unused-dependency
 > removal, `rust-version = "1.87"` (verified against a real 1.87.0 toolchain), a release profile,
@@ -26,8 +27,12 @@ recommendations but is referenced where it constrains the architecture.
 > the platform driver (`PlaybackEngine`). **`playback/transport.rs` is the file that becomes
 > `seq-core` in §B3** — it already has no channels, no threads and no input device.
 >
-> Tests: 1 → 63 (plus 2 doctests). `cargo clippy --all-targets -- -D warnings` is clean. See
-> §Changelog at the end for the detail.
+> Step 3 moved the crate to edition 2024 and turned on `clippy::pedantic` through a `[lints]` table,
+> then cleared all 91 resulting warnings. **MSRV is now 1.88** (let-chains), verified against a real
+> 1.88.0 toolchain.
+>
+> Tests: 1 → 63 (plus 2 doctests). `cargo clippy --all-targets -- -D warnings` is clean *with
+> pedantic on*. See §Changelog at the end for the detail.
 
 ---
 
@@ -719,8 +724,7 @@ Each step is independently shippable and leaves the tree working.
 
 1. ~~**Bug fixes + hygiene** (§A1, §A5, §A6).~~ **Done** — see §Changelog.
 2. ~~**Testability** (§A7).~~ **Done** — see §Changelog.
-3. **Edition 2024 + `[lints]`** (§A4). Mostly `cargo fix --edition`; watch the `impl Future` in the
-   `Sequencer` trait.
+3. ~~**Edition 2024 + `[lints]`** (§A4).~~ **Done** — see §Changelog.
 4. **Workspace split, extract `seq-core` as `no_std`** (§B3). The big one. Integer timing (§A2.5),
    fixed-capacity `Pattern`, synchronous pure generators. Desktop binary keeps working throughout.
 5. **Replace the concurrency model** (§A2). `watch` + `select!`, delete the polling loops and the
@@ -733,6 +737,90 @@ Each step is independently shippable and leaves the tree working.
 
 Steps 1–3 are a weekend. Step 4 is the real investment, and it's the one that makes 6, 7 and 8
 straightforward instead of painful.
+
+---
+
+## Changelog — roadmap step 3 (implemented)
+
+### Edition 2024
+
+`cargo fix --edition` had **nothing to change** — the migration was clean, and `cargo check` came
+back with zero warnings on the first build under 2024. Two things the audit flagged as risks were
+checked and turned out not to bite:
+
+- **The `impl Future` in the `Sequencer` trait.** Edition 2024's RPIT capture change affects
+  return-position `impl Trait` in free and inherent functions; RPIT *in traits* already captured all
+  lifetimes in 2021, so the hand-desugared `fn run(&mut self) -> impl Future<Output = ()> + Send`
+  needed no change. (It should still go away — see §A4's note on making generators synchronous.)
+- **`tail_expr_drop_order`.** The migration lint flagged four sites where a temporary now drops
+  before the block's locals: three in `playback/mod.rs`, one in `playback/engine.rs`. All four are
+  `while let`/tail-expression cases where the value is either moved out of the temporary, or is a
+  lock released at the same function boundary either way. The one worth naming is
+  `update_gui`, where a `MutexGuard` temporary now drops *earlier* — strictly an improvement, since
+  it shortens the lock hold. No `Drop` in the affected set sends messages or closes a port at a
+  point where ordering is observable; the sink is closed inside `Transport::set_sink`, after the
+  release, which the change does not touch.
+
+Also: `unsafe_code = "forbid"` (there was none), `static mut` (none), the `gen` keyword (none).
+
+### `[lints]` table and pedantic cleanup
+
+Configured in `Cargo.toml` rather than `lib.rs`, so it applies to the binary and tests too. Turning
+on `clippy::pedantic` produced 91 warnings; `cargo clippy --fix` took 49 mechanically (inline format
+args, `#[must_use]`, missing semicolons, redundant closures), and the remaining 42 were done by
+hand. `missing_errors_doc`, `missing_panics_doc` and `module_name_repetitions` are waived — not
+worth it for a binary crate with one library consumer. The casting lints are explicitly kept on
+rather than waived with the rest of pedantic: a wrong cast in the timing or MIDI path is silent and
+audible.
+
+Most casts were removed rather than suppressed:
+
+| Site | Before | After |
+|---|---|---|
+| `Transport::sounding_notes` | `enumerate()` then `pitch as u8` | zip over `0..=127u8` — no cast |
+| `Transport::release_all_notes` | index `usize`, `pitch as u8` | iterate `u8`, `usize::from` to index |
+| `SystemClock::now_us` | `as_micros() as u64` | `u64::try_from(..).unwrap_or(u64::MAX)` — total |
+| `Mixer::mix` | `sequence_length as u32` | bounded by a new `MAX_SEQUENCE_STEPS`, then `u32::from` |
+| `mixer::voice` | `as i16` then `as u8` | one documented `#[expect]`, then `u8::try_from(..).ok()?` |
+| `change_pitch` | `clamp(..) as u8` | `u8::try_from` after the clamp |
+| GUI grid drawing | `usize as f32` | loop over `u16`, `f32::from` — no cast |
+
+Four casts genuinely cannot go — float→int has no `From` — and each now carries an `#[expect]` with
+a `reason` explaining why it is sound. There are **no `#[allow]` attributes left in the crate**;
+`#[expect]` is used throughout, so a suppression that stops being needed becomes a warning instead
+of rotting silently.
+
+The `MAX_SEQUENCE_STEPS` bound in the mixer is new behaviour, not just a cast fix: two sequencers
+capped at 16 steps can only ever need lcm(16, 15) = 240 steps, so anything past 4096 is an upstream
+bug, and building it would allocate an event list nobody asked for. It now logs and emits silence.
+
+### Language-level modernization
+
+- **Let-chains** (the reason MSRV is 1.88): both sites the audit identified — in
+  `handle_midi_command` and `update_gui` — are now single `if let ... && let ...` conditions rather
+  than nested `if let`s. Clippy's `collapsible_if` found them automatically once the edition changed.
+- **`handle_input_change` lost ~80 lines.** `too_many_lines` pointed at it, and the fix was not
+  cosmetic: ten keyboard arms were each hand-rolling a
+  `match active_sequencer { Left => left.foo(), Right => right.foo() }` dispatch that `SharedState`
+  already had methods for. Those methods were dead code left from the original design. They are now
+  the only path, so the active-sequencer dispatch exists in exactly one place.
+  `increase_phase`/`decrease_phase` were the two that were missing; they have been added.
+- **`Debug` everywhere** (`missing_debug_implementations`). Eight types took a plain derive. Three
+  needed hand-written impls because they hold trait objects or unbounded type parameters —
+  `Transport` prints the musical state (playing, bpm, step, tick, event count, notes sounding),
+  `PlaybackEngine` forwards to it, and `PlaybackCommand` prints the variant plus an event count
+  rather than dumping a whole sequence into a log line.
+- **rustfmt `style_edition = "2024"`**, which reorders imports by version-sort. 27 files touched,
+  import ordering only.
+
+### Notes
+
+- Test-only cast and `float_cmp` warnings were fixed rather than blanket-allowed — `try_from(..)
+  .unwrap()` in test helpers, and two `#[expect(clippy::float_cmp)]` where the compared values are
+  exact by construction (a clamp returns its bound; the BPM is stored verbatim).
+- One lint is waived per-module with a reason rather than crate-wide: `unreadable_literal` in
+  `gui/theme.rs`, because splitting `0xcba6f7` into digit groups makes a colour harder to read
+  against the palette it came from.
 
 ---
 

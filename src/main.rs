@@ -1,19 +1,19 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use env_logger::Builder;
 use log::{error, info};
 use std::{
-    sync::{mpsc::channel as sync_channel, Arc, Mutex as SyncMutex},
+    sync::{Arc, Mutex as SyncMutex, mpsc::channel as sync_channel},
     thread,
 };
 use tokio::sync::mpsc;
 use tokio::{signal, sync::RwLock};
 
 use sequencer::{
+    EuclideanSequencer, Gui, MidiCommand, Mixer, PlaybackEngine,
+    PlaybackHandler, PlaybackStatus, Sequence, Sequencer,
     gui::{sequencers::euclidean::Gui as EuclideanGui, state::GuiMessage},
     midi_utils,
     playback::state::{PolyphonicSequence, SequencerSlot, SharedState},
-    EuclideanSequencer, Gui, MidiCommand, Mixer, PlaybackEngine,
-    PlaybackHandler, PlaybackStatus, Sequence, Sequencer,
 };
 
 #[tokio::main]

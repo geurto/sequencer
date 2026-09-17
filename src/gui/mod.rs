@@ -6,21 +6,26 @@ pub mod theme;
 
 use crate::MidiCommand;
 use iced::{
+    Alignment::{Center, Start},
+    Element, Length, Subscription, Task, Theme,
     futures::channel::mpsc,
     widget::Container,
     widget::{column, container, row, text},
-    Alignment::{Center, Start},
-    Element, Length, Subscription, Task, Theme,
 };
 use log::{error, info, warn};
 use sequencers::euclidean::{
     Gui as EuclideanGui, Message as EuclideanGuiMessage,
 };
-use state::{poll, Event, GuiMessage};
+use state::{Event, GuiMessage, poll};
 use std::sync::{Arc, Mutex};
 use theme::CustomTheme;
 use tokio::sync::{mpsc::Sender, oneshot};
 
+#[derive(Debug)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "`tx_gui` is the channel *to* the GUI; the prefix is the direction, not the type"
+)]
 pub struct Gui {
     tx_gui: Arc<Mutex<Option<mpsc::Sender<GuiMessage>>>>,
     tx_midi: Sender<MidiCommand>,
@@ -119,7 +124,7 @@ impl Gui {
                     );
                 }
                 Err(e) => {
-                    warn!("Failed to load ports: {}", e);
+                    warn!("Failed to load ports: {e}");
                 }
             },
             GuiMessage::MidiPortSelected(port) => {
@@ -135,7 +140,7 @@ impl Gui {
                             })
                             .await
                         {
-                            Ok(_) => GuiMessage::MidiPortSet(port_to_set),
+                            Ok(()) => GuiMessage::MidiPortSet(port_to_set),
                             Err(e) => GuiMessage::ErrorOccurred(format!(
                                 "Could not send SetPort message: {e}"
                             )),
@@ -145,7 +150,7 @@ impl Gui {
                 );
             }
             GuiMessage::ErrorOccurred(err) => {
-                error!("Received error: {}", err);
+                error!("Received error: {err}");
             }
             GuiMessage::MidiPortSet(port) => {
                 self.selected_midi_port = Some(port);
@@ -243,7 +248,7 @@ impl Gui {
         sequencer_right: EuclideanGui,
     ) -> iced::Result {
         iced::application("Sequencer", Gui::update, Gui::view)
-            .subscription(|gui| gui.subscription())
+            .subscription(Gui::subscription)
             .theme(|_| Theme::Dark)
             .antialiasing(true)
             .centered()

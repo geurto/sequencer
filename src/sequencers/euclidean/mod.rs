@@ -8,11 +8,12 @@ use crate::sequencers::{Note, NoteDuration, Sequence, Sequencer};
 
 use crate::playback::state::{SequencerSlot, SharedState};
 use log::{debug, error};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 /// Velocity of a struck pulse. The mixer scales this by the crossfade ratio.
 const PULSE_VELOCITY: u8 = 100;
 
+#[derive(Debug)]
 pub struct EuclideanSequencer {
     sequencer_slot: SequencerSlot,
     state: EuclideanSequencerState,

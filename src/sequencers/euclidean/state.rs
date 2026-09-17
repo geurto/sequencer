@@ -4,6 +4,7 @@ pub const MAX_STEPS: usize = 16;
 pub const MIN_PITCH: u8 = 20;
 pub const MAX_PITCH: u8 = 108;
 
+#[derive(Debug)]
 pub enum EuclideanSequencerInput {
     IncreaseSteps,
     DecreaseSteps,
@@ -26,6 +27,7 @@ pub struct EuclideanSequencerState {
 }
 
 impl EuclideanSequencerState {
+    #[must_use]
     pub fn new() -> Self {
         EuclideanSequencerState {
             steps: MAX_STEPS,
@@ -81,8 +83,9 @@ impl EuclideanSequencerState {
         // Widen before adding: `self.pitch as i8` wraps for any pitch above
         // 127, and the addition itself can overflow i8.
         let pitch = i16::from(self.pitch) + i16::from(amount);
-        self.pitch =
-            pitch.clamp(i16::from(MIN_PITCH), i16::from(MAX_PITCH)) as u8;
+        let pitch = pitch.clamp(i16::from(MIN_PITCH), i16::from(MAX_PITCH));
+        // Infallible: clamped between two u8 bounds on the line above.
+        self.pitch = u8::try_from(pitch).unwrap_or(MIN_PITCH);
         info!("Pitch: {}", self.pitch);
     }
 }

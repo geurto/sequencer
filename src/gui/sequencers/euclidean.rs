@@ -1,17 +1,17 @@
 use iced::{
+    Alignment::Center,
+    Element, Length, Point, Renderer, Size, Subscription,
     alignment::{Horizontal, Vertical},
     border::Radius,
     widget::{
         canvas::{self, Canvas, Frame, Path, Text},
         column, container,
     },
-    Alignment::Center,
-    Element, Length, Point, Renderer, Size, Subscription,
 };
 
 use crate::{
-    gui::CustomTheme, playback::state::SequencerSlot, EuclideanSequencerState,
-    Sequence, SharedState,
+    EuclideanSequencerState, Sequence, SharedState, gui::CustomTheme,
+    playback::state::SequencerSlot,
 };
 
 #[derive(Debug, Clone)]
@@ -19,6 +19,7 @@ pub enum Message {
     UpdateState(SharedState),
 }
 
+#[derive(Debug)]
 pub struct Gui {
     state: EuclideanSequencerState,
     active_sequencer: bool,
@@ -28,6 +29,7 @@ pub struct Gui {
 }
 
 impl Gui {
+    #[must_use]
     pub fn new(slot: SequencerSlot) -> Self {
         let active_sequencer: bool = slot == SequencerSlot::Left;
         Self {
@@ -56,6 +58,7 @@ impl Gui {
         }
     }
 
+    #[must_use]
     pub fn view(&self) -> Element<'_, Message> {
         let canvas = Canvas::new(self).width(Length::Fill).height(Length::Fill);
         let content = column![canvas].align_x(Center);
@@ -83,6 +86,9 @@ impl canvas::Program<Message> for Gui {
         const CIRCLE_BORDER_RADIUS: f32 = CIRCLE_RADIUS + 2.0;
         const ACTIVE_CIRCLE_BORDER_RADIUS: f32 = CIRCLE_RADIUS + 4.0;
         const CIRCLE_SPACING: f32 = 60.0;
+        const BOX_PADDING_FROM_CIRCLES: f32 = 15.0;
+        const BOX_HEIGHT: f32 = 40.0;
+        const BOX_CORNER_RADIUS: f32 = 8.0;
 
         let mut frame = Frame::new(renderer, bounds.size());
         let center = frame.center();
@@ -96,11 +102,12 @@ impl canvas::Program<Message> for Gui {
             })
             .collect::<Vec<_>>();
 
-        for row in 0..4 {
-            for col in 0..4 {
+        for row in 0..4u16 {
+            for col in 0..4u16 {
+                let index = usize::from(4 * row + col);
                 let circle_center = Point::new(
-                    start_x + CIRCLE_SPACING * (col as f32 + 0.5),
-                    start_y + CIRCLE_SPACING * (row as f32 + 0.5),
+                    start_x + CIRCLE_SPACING * (f32::from(col) + 0.5),
+                    start_y + CIRCLE_SPACING * (f32::from(row) + 0.5),
                 );
 
                 let circle = Path::circle(circle_center, CIRCLE_RADIUS);
@@ -114,14 +121,14 @@ impl canvas::Program<Message> for Gui {
                 frame.fill(&bg_circle, self.theme.primary_color_muted);
 
                 // pulses and current playing note
-                let color = if beat_locations.contains(&(4 * row + col)) {
+                let color = if beat_locations.contains(&index) {
                     self.theme.accent_color
-                } else if 4 * row + col >= self.state.steps {
+                } else if index >= self.state.steps {
                     self.theme.accent_color_muted
                 } else {
                     self.theme.surface_color
                 };
-                if 4 * row + col == self.current_note_index % self.state.steps {
+                if index == self.current_note_index % self.state.steps {
                     frame.fill(&circle, self.theme.primary_color);
                 } else {
                     frame.fill(&circle, color);
@@ -130,10 +137,6 @@ impl canvas::Program<Message> for Gui {
         }
 
         // show note info - rounded rectangle
-        const BOX_PADDING_FROM_CIRCLES: f32 = 15.0;
-        const BOX_HEIGHT: f32 = 40.0;
-        const BOX_CORNER_RADIUS: f32 = 8.0;
-
         let grid_width = 4. * CIRCLE_SPACING;
 
         let box_top_left = Point::new(

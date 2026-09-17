@@ -1,3 +1,5 @@
+use std::fmt;
+
 use device_query::Keycode;
 use log::info;
 
@@ -51,6 +53,7 @@ pub struct PolyphonicSequence {
 }
 
 impl PolyphonicSequence {
+    #[must_use]
     pub fn new(mut events: Vec<TimedEvent>, total_ticks: u32) -> Self {
         events.sort_by_key(|e| (e.tick, e.event.order()));
         Self {
@@ -89,6 +92,26 @@ pub enum PlaybackCommand {
     SetOutputConnection(BoxedSink),
 }
 
+/// Hand-written because `SetOutputConnection` carries a trait object, and
+/// because a whole sequence dumped into a log line is noise.
+impl fmt::Debug for PlaybackCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LoadSequence(sequence) => f
+                .debug_tuple("LoadSequence")
+                .field(&format_args!("{} events", sequence.events().len()))
+                .finish(),
+            Self::SetMidiChannel(channel) => {
+                f.debug_tuple("SetMidiChannel").field(channel).finish()
+            }
+            Self::SetBPM(bpm) => f.debug_tuple("SetBPM").field(bpm).finish(),
+            Self::SetOutputConnection(_) => {
+                f.write_str("SetOutputConnection(..)")
+            }
+        }
+    }
+}
+
 // Data FROM the playback thread TO the UI
 #[derive(Debug, Clone)]
 pub enum PlaybackStatus {
@@ -123,6 +146,7 @@ impl Default for SharedState {
 }
 
 impl SharedState {
+    #[must_use]
     pub fn new(bpm: f64) -> Self {
         SharedState {
             is_playing: false,
@@ -175,6 +199,20 @@ impl SharedState {
         match self.active_sequencer {
             SequencerSlot::Left => self.left_sequencer.decrease_pulses(),
             SequencerSlot::Right => self.right_sequencer.decrease_pulses(),
+        }
+    }
+
+    pub fn increase_phase(&mut self) {
+        match self.active_sequencer {
+            SequencerSlot::Left => self.left_sequencer.increase_phase(),
+            SequencerSlot::Right => self.right_sequencer.increase_phase(),
+        }
+    }
+
+    pub fn decrease_phase(&mut self) {
+        match self.active_sequencer {
+            SequencerSlot::Left => self.left_sequencer.decrease_phase(),
+            SequencerSlot::Right => self.right_sequencer.decrease_phase(),
         }
     }
 
@@ -257,6 +295,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "the clamp returns the bound itself, so the comparison is exact"
+    )]
     fn test_bpm_is_clamped() {
         let mut state = SharedState::new(MAX_BPM);
         state.increase_bpm();

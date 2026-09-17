@@ -1,13 +1,13 @@
 use super::{Gui, GuiMessage};
 
 use iced::{
+    Alignment::Center,
+    Background, Border, Element, Length,
     border::Radius,
     widget::slider::{
         self, Handle, Rail, Status as SliderStatus, Style as SliderStyle,
     },
     widget::{column, container, text},
-    Alignment::Center,
-    Background, Border, Element, Length,
 };
 
 impl Gui {

@@ -6,12 +6,14 @@
 //! to MIDI bytes, which is what makes it testable, and it is the part that
 //! survives into a platform-independent core later.
 
+use std::fmt;
+
 use log::error;
 
 use crate::playback::sink::MidiSink;
 use crate::playback::state::{
-    MidiEventType, PolyphonicSequence, TimedEvent, TICKS_PER_QUARTER_NOTE,
-    TICKS_PER_STEP,
+    MidiEventType, PolyphonicSequence, TICKS_PER_QUARTER_NOTE, TICKS_PER_STEP,
+    TimedEvent,
 };
 
 const NOTE_ON: u8 = 0x90;
@@ -46,6 +48,22 @@ pub struct Transport<S: MidiSink> {
 
     /// Previous reading from the clock, or `None` before the first one.
     last_now_us: Option<u64>,
+}
+
+/// Hand-written rather than derived: the sink is a trait object with no `Debug`
+/// bound, and the interesting content is the musical state, not the plumbing.
+impl<S: MidiSink> fmt::Debug for Transport<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Transport")
+            .field("is_playing", &self.is_playing)
+            .field("bpm", &self.bpm)
+            .field("midi_channel", &self.midi_channel)
+            .field("step", &self.current_step())
+            .field("tick", &self.current_tick)
+            .field("events", &self.sequence.events().len())
+            .field("sounding", &self.sounding_notes().count())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<S: MidiSink> Transport<S> {
@@ -113,17 +131,29 @@ impl<S: MidiSink> Transport<S> {
 
     /// Which sixteenth-note step the play head is on.
     #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "`wrap_around` keeps the head inside the sequence, and a \
+                  float-to-int cast saturates rather than wrapping, so a \
+                  out-of-range head would clamp to a valid step rather than \
+                  produce a bogus index"
+    )]
     pub fn current_step(&self) -> usize {
         (self.current_tick / f64::from(TICKS_PER_STEP)) as usize
     }
 
     /// Pitches currently held, as `(channel, pitch)` pairs. Test/telemetry aid.
     pub fn sounding_notes(&self) -> impl Iterator<Item = (u8, u8)> + '_ {
-        self.sounding.iter().enumerate().flat_map(|(pitch, held)| {
-            (0..MIDI_CHANNELS)
-                .filter(move |channel| held & (1 << channel) != 0)
-                .map(move |channel| (channel, pitch as u8))
-        })
+        // Pitches are counted as u8 rather than indexed by usize, so no cast is
+        // needed to get back to a MIDI pitch.
+        (0..=MAX_MIDI_PITCH).zip(self.sounding.iter()).flat_map(
+            |(pitch, held)| {
+                (0..MIDI_CHANNELS)
+                    .filter(move |channel| held & (1 << channel) != 0)
+                    .map(move |channel| (channel, pitch))
+            },
+        )
     }
 
     /// Swap in a new sequence, keeping the play head at the same relative
@@ -160,7 +190,14 @@ impl<S: MidiSink> Transport<S> {
         let ticks_per_us = (self.bpm / SECONDS_PER_MINUTE)
             * f64::from(TICKS_PER_QUARTER_NOTE)
             / MICROS_PER_SECOND;
-        self.current_tick += delta_us as f64 * ticks_per_us;
+        // Exact: f64 represents every integer below 2^53, and this is the gap
+        // between two clock readings — microseconds, not an absolute timestamp.
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a delta large enough to lose precision is ~285 years"
+        )]
+        let delta_us = delta_us as f64;
+        self.current_tick += delta_us * ticks_per_us;
 
         self.wrap_around();
         self.dispatch_due_events();
@@ -222,17 +259,17 @@ impl<S: MidiSink> Transport<S> {
     /// Explicitly release every note this transport started and has not yet
     /// stopped, on whichever channel it was started on.
     pub fn release_all_notes(&mut self) {
-        for pitch in 0..self.sounding.len() {
-            let held = self.sounding[pitch];
+        for pitch in 0..=MAX_MIDI_PITCH {
+            let held = self.sounding[usize::from(pitch)];
             if held == 0 {
                 continue;
             }
             for channel in 0..MIDI_CHANNELS {
                 if held & (1 << channel) != 0 {
-                    self.send(&[NOTE_OFF | channel, pitch as u8, 0]);
+                    self.send(&[NOTE_OFF | channel, pitch, 0]);
                 }
             }
-            self.sounding[pitch] = 0;
+            self.sounding[usize::from(pitch)] = 0;
         }
 
         // Belt and braces for anything this transport did not start itself
@@ -285,11 +322,14 @@ mod tests {
     pub(super) fn sequence(pitches: &[u8]) -> PolyphonicSequence {
         let mut events = Vec::new();
         for (step, &pitch) in pitches.iter().enumerate() {
-            let tick = step as u32 * TICKS_PER_STEP;
+            let tick = u32::try_from(step).unwrap() * TICKS_PER_STEP;
             events.push(note_on(tick, pitch));
             events.push(note_off(tick + TICKS_PER_STEP - 1, pitch));
         }
-        PolyphonicSequence::new(events, pitches.len() as u32 * TICKS_PER_STEP)
+        PolyphonicSequence::new(
+            events,
+            u32::try_from(pitches.len()).unwrap() * TICKS_PER_STEP,
+        )
     }
 
     /// A single note held for the whole sequence, so the head is reliably
@@ -787,7 +827,8 @@ mod property_tests {
             bpm in 1.0f64..400.0,
             readings in proptest::collection::vec(0u64..5_000_000, 1..40),
         ) {
-            let pitches: Vec<u8> = (0..steps).map(|i| 60 + i as u8).collect();
+            let pitches: Vec<u8> =
+                (0..steps).map(|i| 60 + u8::try_from(i).unwrap()).collect();
             let recorder = RecordingSink::new();
             let mut transport = Transport::new(recorder);
             transport.set_bpm(bpm);

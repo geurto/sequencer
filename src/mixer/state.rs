@@ -1,5 +1,6 @@
 use log::debug;
 
+#[derive(Debug)]
 pub enum MixerInput {
     IncreaseRatio,
     DecreaseRatio,
@@ -11,6 +12,7 @@ pub struct MixerState {
 }
 
 impl MixerState {
+    #[must_use]
     pub fn new() -> Self {
         MixerState { ratio: 0.5 }
     }

@@ -1,16 +1,16 @@
 pub mod state;
 
 use crate::{
-    playback::state::{
-        MidiEventType, PolyphonicSequence, SharedState, TimedEvent,
-        TICKS_PER_STEP,
-    },
     MixerState, Note, Sequence,
+    playback::state::{
+        MidiEventType, PolyphonicSequence, SharedState, TICKS_PER_STEP,
+        TimedEvent,
+    },
 };
 use log::{debug, error, info, warn};
 use num::integer;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 /// Random velocity spread applied to every emitted note, so repeated steps do
 /// not sound mechanical.
@@ -20,6 +20,14 @@ const VELOCITY_JITTER: i16 = 8;
 /// at either extreme really does silence the opposite sequencer.
 const MIN_AUDIBLE_VELOCITY: u8 = 8;
 
+const MAX_VELOCITY: u8 = 127;
+
+/// Longest sequence the mixer will build. Two sequencers capped at 16 steps can
+/// only ever need lcm(16, 15) = 240, so anything past this is a bug upstream —
+/// and building it would allocate an event list nobody asked for.
+const MAX_SEQUENCE_STEPS: u16 = 4096;
+
+#[derive(Debug)]
 pub struct Mixer {
     state: MixerState,
     sequences: (Sequence, Sequence),
@@ -57,10 +65,10 @@ impl Mixer {
                 match sequences {
                     (Some(left), Some(right)) => self.sequences = (left, right),
                     (Some(left), None) => {
-                        self.sequences = (left, self.sequences.1.clone())
+                        self.sequences = (left, self.sequences.1.clone());
                     }
                     (None, Some(right)) => {
-                        self.sequences = (self.sequences.0.clone(), right)
+                        self.sequences = (self.sequences.0.clone(), right);
                     }
                     (None, None) => {}
                 }
@@ -97,13 +105,24 @@ impl Mixer {
         // lcm already equals max() whenever one length divides the other, so
         // the two cases need no separate handling.
         let sequence_length = integer::lcm(len_a, len_b);
-        let total_ticks = sequence_length as u32 * TICKS_PER_STEP;
+        let steps = match u16::try_from(sequence_length) {
+            Ok(steps) if steps <= MAX_SEQUENCE_STEPS => steps,
+            _ => {
+                warn!(
+                    "Sequences of length {len_a} and {len_b} need {sequence_length} steps, \
+                     past the {MAX_SEQUENCE_STEPS}-step limit; emitting silence"
+                );
+                return PolyphonicSequence::default();
+            }
+        };
+        let total_ticks = u32::from(steps) * TICKS_PER_STEP;
 
         let (gain_a, gain_b) = crossfade_gains(self.state.ratio);
 
         let mut timed_events: Vec<TimedEvent> = Vec::new();
-        for i in 0..sequence_length {
-            let tick = i as u32 * TICKS_PER_STEP;
+        for step in 0..steps {
+            let tick = u32::from(step) * TICKS_PER_STEP;
+            let i = usize::from(step);
 
             let voice_a = voice(self.sequences.0.notes[i % len_a], gain_a);
             let voice_b = voice(self.sequences.1.notes[i % len_b], gain_b);
@@ -169,14 +188,24 @@ fn voice(note: Note, gain: f32) -> Option<(Note, u8)> {
 
     // Decide audibility from the crossfade alone, before jitter, so that a
     // fully crossfaded-out voice can never be nudged back into audibility.
-    let base = (f32::from(note.velocity) * gain).round().clamp(0.0, 127.0);
-    if base < f32::from(MIN_AUDIBLE_VELOCITY) {
+    let faded = (f32::from(note.velocity) * gain)
+        .round()
+        .clamp(0.0, f32::from(MAX_VELOCITY));
+    if faded < f32::from(MIN_AUDIBLE_VELOCITY) {
         return None;
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "rounded and clamped to 0..=127 on the line above, so exact"
+    )]
+    let base = faded as i16;
+
     let jitter = rand::random_range(-VELOCITY_JITTER..=VELOCITY_JITTER);
-    let velocity = (base as i16 + jitter).clamp(1, 127) as u8;
-    Some((note, velocity))
+    let velocity = (base + jitter).clamp(1, i16::from(MAX_VELOCITY));
+
+    // Infallible after the clamp; `?` keeps it total without an unwrap.
+    Some((note, u8::try_from(velocity).ok()?))
 }
 
 /// Emit the Note-On/Note-Off pair for one voice.
@@ -271,10 +300,10 @@ mod tests {
         for event in mixed.events() {
             match event.event {
                 MidiEventType::NoteOn { pitch, .. } => {
-                    *held.entry(pitch).or_default() += 1
+                    *held.entry(pitch).or_default() += 1;
                 }
                 MidiEventType::NoteOff { pitch } => {
-                    *held.entry(pitch).or_default() -= 1
+                    *held.entry(pitch).or_default() -= 1;
                 }
             }
         }

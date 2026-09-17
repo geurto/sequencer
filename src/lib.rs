@@ -4,17 +4,17 @@ pub mod playback;
 pub mod sequencers;
 
 pub use gui::Gui;
-pub use mixer::{state::MixerState, Mixer};
+pub use mixer::{Mixer, state::MixerState};
 pub use playback::{
+    PlaybackHandler,
     clock::{Clock, ManualClock, SystemClock},
     engine::PlaybackEngine,
-    midi::{midi_utils, MidiCommand},
+    midi::{MidiCommand, midi_utils},
     sink::{MidiSink, RecordingSink, SendError},
     state::{PlaybackCommand, PlaybackStatus, SharedState},
     transport::Transport,
-    PlaybackHandler,
 };
 pub use sequencers::{
-    euclidean::{state::EuclideanSequencerState, EuclideanSequencer},
     Note, NoteDuration, Sequence, Sequencer,
+    euclidean::{EuclideanSequencer, state::EuclideanSequencerState},
 };

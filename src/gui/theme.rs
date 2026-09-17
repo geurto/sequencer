@@ -1,6 +1,14 @@
-use iced::{color, Color, Font};
+// A colour is one atomic value; splitting `0xcba6f7` into digit groups makes it
+// harder to read against the palette it came from, not easier.
+#![expect(
+    clippy::unreadable_literal,
+    reason = "hex colour literals read better whole"
+)]
+
+use iced::{Color, Font, color};
 use iced_futures::core::font;
 
+#[derive(Clone, Copy, Debug)]
 pub struct CustomTheme {
     pub primary_color: Color,
     pub primary_color_muted: Color,

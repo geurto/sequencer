@@ -5,8 +5,8 @@
 //! instead of sleeping, and so the eventual embedded build can substitute a
 //! hardware timer.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 /// A monotonic source of elapsed microseconds.
@@ -40,8 +40,9 @@ impl Default for SystemClock {
 
 impl Clock for SystemClock {
     fn now_us(&self) -> u64 {
-        // u64 microseconds covers ~584,000 years from the origin.
-        self.origin.elapsed().as_micros() as u64
+        // u64 microseconds covers ~584,000 years from the origin; saturating
+        // rather than casting keeps the conversion total regardless.
+        u64::try_from(self.origin.elapsed().as_micros()).unwrap_or(u64::MAX)
     }
 }
 

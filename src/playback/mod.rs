@@ -8,19 +8,17 @@ pub mod transport;
 use device_query::Keycode;
 use log::{error, info, warn};
 use std::{
-    sync::{mpsc::Sender as SyncSender, Arc, Mutex as SyncMutex},
+    sync::{Arc, Mutex as SyncMutex, mpsc::Sender as SyncSender},
     time::Duration,
 };
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 use crate::{
+    MidiCommand,
     gui::state::{Event, GuiMessage},
-    midi_utils, MidiCommand,
+    midi_utils,
 };
-use state::{
-    PlaybackCommand, PlaybackStatus, PolyphonicSequence, SequencerSlot,
-    SharedState,
-};
+use state::{PlaybackCommand, PlaybackStatus, PolyphonicSequence, SharedState};
 
 /// Idle back-off for the handler loop.
 ///
@@ -29,6 +27,7 @@ use state::{
 /// real fix is to select over the receivers rather than poll them.
 const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+#[derive(Debug)]
 pub struct PlaybackHandler {
     state: Arc<RwLock<SharedState>>,
 
@@ -84,9 +83,9 @@ impl PlaybackHandler {
                         self.update_gui().await;
                     }
                     PlaybackStatus::InputChanged(input) => {
-                        self.handle_input_change(input).await
+                        self.handle_input_change(input).await;
                     }
-                };
+                }
             }
 
             while let Ok(sequence) = self.rx_sequence.try_recv() {
@@ -124,16 +123,18 @@ impl PlaybackHandler {
 
                         if let Some(mut tx) =
                             self.tx_gui.lock().unwrap().clone()
-                        {
-                            if let Err(e) =
+                            && let Err(e) =
                                 tx.try_send(GuiMessage::MidiPortSet(out_port))
-                            {
-                                error!("Error sending Message::MidiPortSet to GUI: {e:?}");
-                            }
+                        {
+                            error!(
+                                "Error sending Message::MidiPortSet to GUI: {e:?}"
+                            );
                         }
                     }
                     Err(e) => {
-                        error!("Unable to connect to MIDI port {out_port}: {e}")
+                        error!(
+                            "Unable to connect to MIDI port {out_port}: {e}"
+                        );
                     }
                 }
             }
@@ -153,11 +154,12 @@ impl PlaybackHandler {
             for key in diff {
                 match key {
                     Keycode::Space => {
-                        match w_state.is_playing {
-                            true => info!("Paused playback!"),
-                            false => info!("Resumed playback!"),
-                        };
-                        w_state.is_playing = !w_state.is_playing
+                        w_state.is_playing = !w_state.is_playing;
+                        if w_state.is_playing {
+                            info!("Resumed playback!");
+                        } else {
+                            info!("Paused playback!");
+                        }
                     }
                     Keycode::C => {
                         w_state.change_midi_channel();
@@ -174,89 +176,21 @@ impl PlaybackHandler {
                     Keycode::F => {
                         w_state.mixer.decrease_ratio();
                     }
-                    Keycode::Up => match w_state.active_sequencer {
-                        SequencerSlot::Left => {
-                            w_state.left_sequencer.increase_steps();
-                        }
-                        SequencerSlot::Right => {
-                            w_state.right_sequencer.increase_steps()
-                        }
-                    },
-                    Keycode::Down => match w_state.active_sequencer {
-                        SequencerSlot::Left => {
-                            w_state.left_sequencer.decrease_steps()
-                        }
-                        SequencerSlot::Right => {
-                            w_state.right_sequencer.decrease_steps()
-                        }
-                    },
-                    Keycode::Right => match w_state.active_sequencer {
-                        SequencerSlot::Left => {
-                            w_state.left_sequencer.increase_pulses()
-                        }
-                        SequencerSlot::Right => {
-                            w_state.right_sequencer.increase_pulses()
-                        }
-                    },
-                    Keycode::Left => match w_state.active_sequencer {
-                        SequencerSlot::Left => {
-                            w_state.left_sequencer.decrease_pulses()
-                        }
-                        SequencerSlot::Right => {
-                            w_state.right_sequencer.decrease_pulses()
-                        }
-                    },
-                    Keycode::RightBracket => match w_state.active_sequencer {
-                        SequencerSlot::Left => {
-                            w_state.left_sequencer.increase_phase()
-                        }
-                        SequencerSlot::Right => {
-                            w_state.right_sequencer.increase_phase()
-                        }
-                    },
-                    Keycode::LeftBracket => match w_state.active_sequencer {
-                        SequencerSlot::Left => {
-                            w_state.left_sequencer.decrease_phase()
-                        }
-                        SequencerSlot::Right => {
-                            w_state.right_sequencer.decrease_phase()
-                        }
-                    },
-                    Keycode::W => match w_state.active_sequencer {
-                        SequencerSlot::Left => {
-                            w_state.left_sequencer.change_pitch(1)
-                        }
-                        SequencerSlot::Right => {
-                            w_state.right_sequencer.change_pitch(1)
-                        }
-                    },
-                    Keycode::S => match w_state.active_sequencer {
-                        SequencerSlot::Left => {
-                            w_state.left_sequencer.change_pitch(-1)
-                        }
-                        SequencerSlot::Right => {
-                            w_state.right_sequencer.change_pitch(-1)
-                        }
-                    },
-                    Keycode::D => match w_state.active_sequencer {
-                        SequencerSlot::Left => {
-                            w_state.left_sequencer.change_pitch(12)
-                        }
-                        SequencerSlot::Right => {
-                            w_state.right_sequencer.change_pitch(12)
-                        }
-                    },
-                    Keycode::A => match w_state.active_sequencer {
-                        SequencerSlot::Left => {
-                            w_state.left_sequencer.change_pitch(-12)
-                        }
-                        SequencerSlot::Right => {
-                            w_state.right_sequencer.change_pitch(-12)
-                        }
-                    },
+                    // These all act on whichever sequencer is active;
+                    // `SharedState` owns that dispatch.
+                    Keycode::Up => w_state.increase_steps(),
+                    Keycode::Down => w_state.decrease_steps(),
+                    Keycode::Right => w_state.increase_pulses(),
+                    Keycode::Left => w_state.decrease_pulses(),
+                    Keycode::RightBracket => w_state.increase_phase(),
+                    Keycode::LeftBracket => w_state.decrease_phase(),
+                    Keycode::W => w_state.change_pitch(1),
+                    Keycode::S => w_state.change_pitch(-1),
+                    Keycode::D => w_state.change_pitch(12),
+                    Keycode::A => w_state.change_pitch(-12),
                     Keycode::Tab => w_state.switch_active_sequencer(),
                     _ => {}
-                };
+                }
             }
 
             (w_state.bpm, w_state.midi_channel)
@@ -273,12 +207,12 @@ impl PlaybackHandler {
 
     pub async fn update_gui(&self) {
         let state = self.state.read().await;
-        if let Some(mut tx) = self.tx_gui.lock().unwrap().clone() {
-            if let Err(e) = tx.try_send(GuiMessage::ReceivedEvent(
+        if let Some(mut tx) = self.tx_gui.lock().unwrap().clone()
+            && let Err(e) = tx.try_send(GuiMessage::ReceivedEvent(
                 Event::StateChanged(state.clone()),
-            )) {
-                error!("Error sending Message to GUI: {e:?}");
-            }
+            ))
+        {
+            error!("Error sending Message to GUI: {e:?}");
         }
     }
 }

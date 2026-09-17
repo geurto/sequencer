@@ -1,8 +1,8 @@
 use crate::{
-    gui::sequencers::euclidean::Message as EuclideanGuiMessage, SharedState,
+    SharedState, gui::sequencers::euclidean::Message as EuclideanGuiMessage,
 };
 use iced::{
-    futures::{channel::mpsc, SinkExt, Stream},
+    futures::{SinkExt, Stream, channel::mpsc},
     stream,
 };
 use log::error;
@@ -32,7 +32,7 @@ pub fn poll() -> impl Stream<Item = Event> {
         let (sender, mut receiver) = mpsc::channel(100);
 
         if let Err(e) = output.send(Event::Connected(sender)).await {
-            error!("Error sending Event::Connected: {}", e);
+            error!("Error sending Event::Connected: {e}");
         }
 
         loop {
@@ -45,7 +45,7 @@ pub fn poll() -> impl Stream<Item = Event> {
                     .send(event)
                     .await
                     .expect("Failed to send Message::ReceivedEvent");
-            };
+            }
         }
     })
 }

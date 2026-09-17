@@ -7,6 +7,7 @@
 use device_query::{DeviceQuery, DeviceState, Keycode};
 use log::{error, info};
 use std::collections::HashSet;
+use std::fmt;
 use std::{sync::mpsc::Receiver, time::Duration};
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -37,7 +38,19 @@ pub struct PlaybackEngine<C: Clock = SystemClock> {
     last_reported_step: Option<usize>,
 }
 
+/// Hand-written because the clock carries no `Debug` bound; forwards to
+/// [`Transport`], which holds everything worth looking at.
+impl<C: Clock> fmt::Debug for PlaybackEngine<C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PlaybackEngine")
+            .field("transport", &self.transport)
+            .field("last_reported_step", &self.last_reported_step)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PlaybackEngine<SystemClock> {
+    #[must_use]
     pub fn new(
         rx_command: Receiver<PlaybackCommand>,
         tx_status: UnboundedSender<PlaybackStatus>,
@@ -151,10 +164,10 @@ mod tests {
     use crate::playback::clock::ManualClock;
     use crate::playback::sink::RecordingSink;
     use crate::playback::state::{
-        MidiEventType, PolyphonicSequence, TimedEvent, TICKS_PER_STEP,
+        MidiEventType, PolyphonicSequence, TICKS_PER_STEP, TimedEvent,
     };
-    use std::sync::mpsc::{channel as sync_channel, Sender as SyncSender};
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+    use std::sync::mpsc::{Sender as SyncSender, channel as sync_channel};
+    use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
     /// At 120 BPM a sixteenth-note step is 125 ms.
     const STEP_US: u64 = 125_000;
@@ -226,7 +239,7 @@ mod tests {
     fn sequence(pitches: &[u8]) -> PolyphonicSequence {
         let mut events = Vec::new();
         for (step, &pitch) in pitches.iter().enumerate() {
-            let tick = step as u32 * TICKS_PER_STEP;
+            let tick = u32::try_from(step).unwrap() * TICKS_PER_STEP;
             events.push(TimedEvent {
                 tick,
                 event: MidiEventType::NoteOn {
@@ -239,10 +252,17 @@ mod tests {
                 event: MidiEventType::NoteOff { pitch },
             });
         }
-        PolyphonicSequence::new(events, pitches.len() as u32 * TICKS_PER_STEP)
+        PolyphonicSequence::new(
+            events,
+            u32::try_from(pitches.len()).unwrap() * TICKS_PER_STEP,
+        )
     }
 
     #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "the BPM is stored verbatim, so the comparison is exact"
+    )]
     fn test_commands_reach_the_transport() {
         let mut harness = Harness::new();
 

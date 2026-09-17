@@ -6,7 +6,7 @@ pub trait Sequencer {
     fn run(&mut self) -> impl std::future::Future<Output = ()> + Send;
 }
 
-/// NoteDuration is a helper enum to define note durations in musical notation.
+/// `NoteDuration` is a helper enum to define note durations in musical notation.
 /// The discriminants are lengths in sixteenth notes, which is also the
 /// sequencer's step resolution.
 #[derive(Clone, Copy, Debug)]
@@ -38,6 +38,7 @@ pub struct Note {
 }
 
 impl Note {
+    #[must_use]
     pub fn new(pitch: u8, velocity: u8, duration: NoteDuration) -> Self {
         Note {
             pitch,
@@ -49,6 +50,7 @@ impl Note {
     /// A silent step. Pitch 0 is the rest sentinel throughout the sequencer;
     /// go through this constructor rather than spelling it out, so there is a
     /// single place to change when rests become `Option<Note>`.
+    #[must_use]
     pub fn rest() -> Self {
         Note::new(0, 0, NoteDuration::Sixteenth)
     }
@@ -66,6 +68,7 @@ pub struct Sequence {
 }
 
 impl Sequence {
+    #[must_use]
     pub fn empty() -> Self {
         Sequence { notes: vec![] }
     }

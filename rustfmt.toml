@@ -1,8 +1,8 @@
 # Only options rustfmt accepts on the stable channel. The previous file was a
 # dump of `rustfmt --print-config default`, which set ~30 nightly-only options
 # and printed a warning for each on every run.
-edition = "2021"
-style_edition = "2021"
+edition = "2024"
+style_edition = "2024"
 
 max_width = 80
 
