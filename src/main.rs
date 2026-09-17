@@ -1,5 +1,6 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use env_logger::Builder;
+use log::{error, info};
 use std::{
     sync::{mpsc::channel as sync_channel, Arc, Mutex as SyncMutex},
     thread,
@@ -44,13 +45,13 @@ async fn main() -> Result<()> {
     let shared_state: Arc<RwLock<SharedState>> =
         Arc::new(RwLock::new(SharedState::new(120.)));
 
-    // Sequencers and mixer
+    // Sequencers and mixer. Each sequencer emits its opening sequence as soon
+    // as it starts running, so there is nothing to prime here.
     let mut sequencer_a = EuclideanSequencer::new(
         SequencerSlot::Left,
         shared_state.clone(),
         tx_sequence.clone(),
     );
-    sequencer_a.generate_sequence();
     tokio::spawn(async move {
         sequencer_a.run().await;
     });
@@ -61,17 +62,22 @@ async fn main() -> Result<()> {
         shared_state.clone(),
         tx_sequence.clone(),
     );
-    sequencer_b.generate_sequence();
     tokio::spawn(async move { sequencer_b.run().await });
 
     let mut sequence_mixer =
         Mixer::new(shared_state.clone(), rx_sequence, tx_mixed_sequence);
-    sequence_mixer.mix().await;
     tokio::spawn(async move { sequence_mixer.run().await });
 
     // Playback
     let midi_ports = midi_utils::list_ports()?;
-    let midi_conn = midi_utils::create_connection(midi_ports[0].clone())?;
+    let out_port = midi_ports.first().ok_or_else(|| {
+        anyhow!(
+            "No MIDI output ports found. Start a synthesiser (e.g. FluidSynth) \
+             or connect a MIDI device, then run the sequencer again."
+        )
+    })?;
+    info!("Connecting to MIDI output port {out_port}");
+    let midi_conn = midi_utils::create_connection(out_port)?;
 
     // Link between async GUI and sync playback engine
     let tx_gui_playback = tx_gui.clone();
@@ -92,6 +98,18 @@ async fn main() -> Result<()> {
         playback_engine.run();
     });
 
+    // Shutdown. This has to be installed *before* the GUI takes over the
+    // calling thread: spawning it afterwards means it only starts once the
+    // window has already closed and main is about to return anyway.
+    tokio::spawn(async move {
+        if let Err(e) = signal::ctrl_c().await {
+            error!("Failed to install Ctrl+C handler: {e}");
+            return;
+        }
+        info!("Ctrl+C received, exiting...");
+        std::process::exit(0);
+    });
+
     // GUI
     let gui_sequencer_left = EuclideanGui::new(SequencerSlot::Left);
     let gui_sequencer_right = EuclideanGui::new(SequencerSlot::Right);
@@ -102,15 +120,6 @@ async fn main() -> Result<()> {
         gui_sequencer_left,
         gui_sequencer_right,
     )?;
-
-    // Shutdown
-    let _ctrl_c_handle = tokio::spawn(async move {
-        signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
-        println!("Ctrl+C received, exiting...");
-        std::process::exit(0);
-    });
 
     Ok(())
 }

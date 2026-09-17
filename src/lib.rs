@@ -13,5 +13,5 @@ pub use playback::{
 };
 pub use sequencers::{
     euclidean::{state::EuclideanSequencerState, EuclideanSequencer},
-    Sequence, Sequencer,
+    Note, NoteDuration, Sequence, Sequencer,
 };

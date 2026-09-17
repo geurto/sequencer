@@ -155,7 +155,7 @@ impl Gui {
         Task::none()
     }
 
-    pub fn view(&self) -> Element<GuiMessage> {
+    pub fn view(&self) -> Element<'_, GuiMessage> {
         let sequencer_left_view = Container::new(
             self.sequencer_left.view().map(GuiMessage::LeftSequencer),
         )
@@ -184,7 +184,7 @@ impl Gui {
                 .color(self.theme.secondary_text_color)
                 .font(self.theme.bold_font)
                 .size(self.theme.header_text_size),
-            text("Spacebar: resume / pause playback\nTab: change active sequencer\nCtrl+C: exit program")
+            text("Spacebar: resume / pause playback\nTab: change active sequencer\n= / -: increase / decrease tempo\nC: cycle MIDI channel\nCtrl+C: exit program")
                 .color(self.theme.text_color)
                 .size(self.theme.text_size),
             text("Active sequencer")

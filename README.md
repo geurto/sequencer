@@ -47,6 +47,10 @@ To operate the sequencer, you can attach a keyboard to whatever device is runnin
 The common keyboard shortcuts are:
 - `SPACE` to start/stop the sequencer
 - `TAB` to switch between active sequencer
+- `C` to cycle through the 16 MIDI channels
+- `=` to increase the tempo by 1 BPM
+- `-` to decrease the tempo by 1 BPM
+- `CTRL+C` to exit
 
 ### Active sequencer
 - `W` to increase the MIDI note by 1
@@ -59,8 +63,13 @@ The common keyboard shortcuts are:
 - `DOWN` to decrease the number of steps by 1
 - `LEFT` to decrease the number of pulses by 1
 - `RIGHT` to increase the number of pulses by 1
+- `]` to rotate the pattern forwards by one step
+- `[` to rotate the pattern backwards by one step
 
 ### Mixer
+The mixer ratio is an equal-power crossfade between the two sequencers: `0.0` is
+the left sequencer alone, `1.0` is the right one alone, and `0.5` sounds both.
+
 - `R` to increase mixer ratio by 0.05
 - `F` to decrease mixer ratio by 0.05
 

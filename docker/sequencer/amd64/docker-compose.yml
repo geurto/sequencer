@@ -1,5 +1,3 @@
-version: "2.4"
-
 services:
   sequencer:
     image: docker.io/geurto/generative-sequencer:sequencer-amd64

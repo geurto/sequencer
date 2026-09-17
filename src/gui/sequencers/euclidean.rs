@@ -56,7 +56,7 @@ impl Gui {
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let canvas = Canvas::new(self).width(Length::Fill).height(Length::Fill);
         let content = column![canvas].align_x(Center);
         container(content)

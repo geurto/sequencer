@@ -11,7 +11,7 @@ use iced::{
 };
 
 impl Gui {
-    pub fn view_mixer(&self) -> Element<GuiMessage> {
+    pub fn view_mixer(&self) -> Element<'_, GuiMessage> {
         let theme = &self.theme;
         let slider = iced::widget::slider(
             0.0..=1.0,

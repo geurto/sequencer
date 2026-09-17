@@ -1,5 +1,3 @@
-version: "2.4"
-
 services:
   fluidsynth:
     image: docker.io/geurto/generative-sequencer:synth

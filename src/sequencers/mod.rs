@@ -1,14 +1,14 @@
 pub mod euclidean;
 
-use std::fmt::Debug;
-
 pub trait Sequencer {
+    #[must_use]
     fn generate_sequence(&self) -> Sequence;
     fn run(&mut self) -> impl std::future::Future<Output = ()> + Send;
 }
 
-/// NoteDuration is a helper enum to define note durations in musical notation. These durations are
-/// then converted to seconds in playback.
+/// NoteDuration is a helper enum to define note durations in musical notation.
+/// The discriminants are lengths in sixteenth notes, which is also the
+/// sequencer's step resolution.
 #[derive(Clone, Copy, Debug)]
 pub enum NoteDuration {
     Sixteenth = 1,
@@ -21,7 +21,15 @@ pub enum NoteDuration {
     Whole = 16,
 }
 
-/// A Note is a MIDI object with pitch, velocity, duration, and a channel.
+impl NoteDuration {
+    /// Length of this note in sequencer steps (sixteenth notes).
+    #[must_use]
+    pub fn steps(self) -> u32 {
+        self as u32
+    }
+}
+
+/// A Note is a MIDI object with pitch, velocity, and duration.
 #[derive(Clone, Copy, Debug)]
 pub struct Note {
     pub pitch: u8,
@@ -37,10 +45,22 @@ impl Note {
             duration,
         }
     }
+
+    /// A silent step. Pitch 0 is the rest sentinel throughout the sequencer;
+    /// go through this constructor rather than spelling it out, so there is a
+    /// single place to change when rests become `Option<Note>`.
+    pub fn rest() -> Self {
+        Note::new(0, 0, NoteDuration::Sixteenth)
+    }
+
+    #[must_use]
+    pub fn is_rest(&self) -> bool {
+        self.pitch == 0
+    }
 }
 
 /// A Sequence is defined as a vector of Notes, produced by one single Sequencer.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Sequence {
     pub notes: Vec<Note>,
 }
@@ -50,8 +70,9 @@ impl Sequence {
         Sequence { notes: vec![] }
     }
 
+    #[must_use]
     pub fn midi_to_note_name(pitch: u8) -> String {
-        let note_names = [
+        const NOTE_NAMES: [&str; 12] = [
             "C.",
             "C#. / Db.",
             "D.",
@@ -65,24 +86,20 @@ impl Sequence {
             "A#. / Bb.",
             "B.",
         ];
-        let octave = ((pitch - 12) as f32 / 12.).floor();
-        let note = note_names[((pitch - 12) % 12) as usize];
+        // MIDI note 12 is C0, so note 0 lands in octave -1. Computing this as
+        // `pitch - 12` underflows for the rest sentinel and every note below C0.
+        let octave = i16::from(pitch) / 12 - 1;
+        let note = NOTE_NAMES[(pitch % 12) as usize];
 
-        note.replace(".", &format!("{octave}"))
+        note.replace('.', &octave.to_string())
     }
 }
 
 impl Default for Sequence {
     fn default() -> Self {
-        let notes = vec![Note::new(0, 0, NoteDuration::Sixteenth); 16];
+        let notes = vec![Note::rest(); 16];
         Sequence { notes }
     }
-}
-
-/// A MixedSequence is the result of mixing two Sequences in the Mixer.
-#[derive(Debug)]
-pub struct MixedSequence {
-    pub notes: Vec<(Option<Note>, Option<Note>)>,
 }
 
 #[cfg(test)]
@@ -99,5 +116,21 @@ mod tests {
         assert_eq!(Sequence::midi_to_note_name(69), "A4");
         assert_eq!(Sequence::midi_to_note_name(96), "C7");
         assert_eq!(Sequence::midi_to_note_name(127), "G9");
+    }
+
+    /// Notes below C0 used to underflow `pitch - 12` and panic. Pitch 0 is the
+    /// rest sentinel, so this was reachable from the GUI.
+    #[test]
+    fn test_pitch_to_note_below_c0() {
+        assert_eq!(Sequence::midi_to_note_name(0), "C-1");
+        assert_eq!(Sequence::midi_to_note_name(11), "B-1");
+        assert_eq!(Sequence::midi_to_note_name(12), "C0");
+    }
+
+    #[test]
+    fn test_pitch_to_note_never_panics() {
+        for pitch in 0..=u8::MAX {
+            let _ = Sequence::midi_to_note_name(pitch);
+        }
     }
 }

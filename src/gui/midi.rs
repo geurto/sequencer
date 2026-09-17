@@ -12,7 +12,7 @@ use iced::{
 };
 
 impl Gui {
-    pub fn view_midi(&self) -> Element<GuiMessage> {
+    pub fn view_midi(&self) -> Element<'_, GuiMessage> {
         let dropdown = pick_list(
             self.midi_out_ports.clone(),
             self.selected_midi_port.clone(),

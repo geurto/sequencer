@@ -2,7 +2,6 @@ pub mod engine;
 pub mod midi;
 pub mod state;
 
-use anyhow::Result;
 use device_query::Keycode;
 use log::{error, info, warn};
 use std::{
@@ -19,6 +18,13 @@ use state::{
     PlaybackCommand, PlaybackStatus, PolyphonicSequence, SequencerSlot,
     SharedState,
 };
+
+/// Idle back-off for the handler loop.
+///
+/// Without this the loop contains no await point when every channel is empty,
+/// so the task never yields and permanently occupies a runtime worker. The
+/// real fix is to select over the receivers rather than poll them.
+const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub struct PlaybackHandler {
     state: Arc<RwLock<SharedState>>,
@@ -53,7 +59,17 @@ impl PlaybackHandler {
         }
     }
 
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) {
+        // The engine boots with its own hardcoded defaults; make the shared
+        // state authoritative before anything plays.
+        {
+            let state = self.state.read().await;
+            self.send_engine(PlaybackCommand::SetBPM(state.bpm));
+            self.send_engine(PlaybackCommand::SetMidiChannel(
+                state.midi_channel,
+            ));
+        }
+
         loop {
             // get synchronous engine status
             while let Ok(status) = self.rx_engine_status.try_recv() {
@@ -71,37 +87,37 @@ impl PlaybackHandler {
             }
 
             while let Ok(sequence) = self.rx_sequence.try_recv() {
-                if let Err(e) =
-                    self.tx_engine.send(PlaybackCommand::LoadSequence(sequence))
-                {
-                    error!(
-                    "Error sending PolyphonicSequence to PlaybackEngine: {e}"
-                );
-                }
+                self.send_engine(PlaybackCommand::LoadSequence(sequence));
             }
 
             // get changes to MIDI
             while let Ok(midi_command) = self.rx_midi.try_recv() {
-                match midi_command {
-                    MidiCommand::GetPorts { responder } => {
-                        let port_names = midi_utils::list_ports()?;
+                self.handle_midi_command(midi_command);
+            }
+
+            tokio::time::sleep(IDLE_POLL_INTERVAL).await;
+        }
+    }
+
+    fn handle_midi_command(&self, midi_command: MidiCommand) {
+        match midi_command {
+            MidiCommand::GetPorts { responder } => {
+                match midi_utils::list_ports() {
+                    Ok(port_names) => {
                         if responder.send(port_names).is_err() {
                             warn!("Unable to send MIDI output ports.");
                         }
                     }
-                    MidiCommand::SetPort { out_port } => {
-                        info!("Received SetPort from GUI");
-                        let conn_out =
-                            midi_utils::create_connection(out_port.clone())?;
-
-                        match self.tx_engine.send(
-                            PlaybackCommand::SetOutputConnection(conn_out),
-                        ) {
-                            Ok(_) => {}
-                            Err(e) => {
-                                error!("Error sending MidiOutputConnection to PlaybackEngine: {e}")
-                            }
-                        }
+                    Err(e) => error!("Unable to list MIDI output ports: {e}"),
+                }
+            }
+            MidiCommand::SetPort { out_port } => {
+                info!("Received SetPort from GUI");
+                match midi_utils::create_connection(&out_port) {
+                    Ok(conn_out) => {
+                        self.send_engine(PlaybackCommand::SetOutputConnection(
+                            conn_out,
+                        ));
 
                         if let Some(mut tx) =
                             self.tx_gui.lock().unwrap().clone()
@@ -109,132 +125,145 @@ impl PlaybackHandler {
                             if let Err(e) =
                                 tx.try_send(GuiMessage::MidiPortSet(out_port))
                             {
-                                error!("Error sending Message::MidiPortSet to GUI: {:?}", e);
+                                error!("Error sending Message::MidiPortSet to GUI: {e:?}");
                             }
                         }
                     }
-                };
+                    Err(e) => {
+                        error!("Unable to connect to MIDI port {out_port}: {e}")
+                    }
+                }
             }
         }
     }
 
-    pub async fn handle_input_change(&mut self, diff: Vec<Keycode>) {
-        let mut w_state = self.state.write().await;
-
-        for key in diff {
-            match key {
-                Keycode::Space => {
-                    match w_state.is_playing {
-                        true => info!("Paused playback!"),
-                        false => info!("Resumed playback!"),
-                    };
-                    w_state.is_playing = !w_state.is_playing
-                }
-                Keycode::C => {
-                    w_state.midi_channel = (w_state.midi_channel + 1) % 16;
-                    info!(
-                        "Changing MIDI channel to {}",
-                        w_state.midi_channel + 1
-                    );
-                }
-                Keycode::R => {
-                    w_state.mixer.increase_ratio();
-                }
-                Keycode::F => {
-                    w_state.mixer.decrease_ratio();
-                }
-                Keycode::Up => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.left_sequencer.increase_steps();
-                    }
-                    SequencerSlot::Right => {
-                        w_state.right_sequencer.increase_steps()
-                    }
-                },
-                Keycode::Down => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.left_sequencer.decrease_steps()
-                    }
-                    SequencerSlot::Right => {
-                        w_state.right_sequencer.decrease_steps()
-                    }
-                },
-                Keycode::Right => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.left_sequencer.increase_pulses()
-                    }
-                    SequencerSlot::Right => {
-                        w_state.right_sequencer.increase_pulses()
-                    }
-                },
-                Keycode::Left => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.left_sequencer.decrease_pulses()
-                    }
-                    SequencerSlot::Right => {
-                        w_state.right_sequencer.decrease_pulses()
-                    }
-                },
-                Keycode::RightBracket => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.left_sequencer.increase_phase()
-                    }
-                    SequencerSlot::Right => {
-                        w_state.right_sequencer.increase_phase()
-                    }
-                },
-                Keycode::LeftBracket => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.left_sequencer.decrease_phase()
-                    }
-                    SequencerSlot::Right => {
-                        w_state.right_sequencer.decrease_phase()
-                    }
-                },
-                Keycode::W => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.left_sequencer.change_pitch(1)
-                    }
-                    SequencerSlot::Right => {
-                        w_state.right_sequencer.change_pitch(1)
-                    }
-                },
-                Keycode::S => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.left_sequencer.change_pitch(-1)
-                    }
-                    SequencerSlot::Right => {
-                        w_state.right_sequencer.change_pitch(-1)
-                    }
-                },
-                Keycode::D => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.left_sequencer.change_pitch(12)
-                    }
-                    SequencerSlot::Right => {
-                        w_state.right_sequencer.change_pitch(12)
-                    }
-                },
-                Keycode::A => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.left_sequencer.change_pitch(-12)
-                    }
-                    SequencerSlot::Right => {
-                        w_state.right_sequencer.change_pitch(-12)
-                    }
-                },
-                Keycode::Tab => match w_state.active_sequencer {
-                    SequencerSlot::Left => {
-                        w_state.active_sequencer = SequencerSlot::Right
-                    }
-                    SequencerSlot::Right => {
-                        w_state.active_sequencer = SequencerSlot::Left
-                    }
-                },
-                _ => {}
-            };
+    fn send_engine(&self, command: PlaybackCommand) {
+        if let Err(e) = self.tx_engine.send(command) {
+            error!("Error sending command to PlaybackEngine: {e}");
         }
-        drop(w_state);
+    }
+
+    pub async fn handle_input_change(&mut self, diff: Vec<Keycode>) {
+        let (bpm, midi_channel) = {
+            let mut w_state = self.state.write().await;
+
+            for key in diff {
+                match key {
+                    Keycode::Space => {
+                        match w_state.is_playing {
+                            true => info!("Paused playback!"),
+                            false => info!("Resumed playback!"),
+                        };
+                        w_state.is_playing = !w_state.is_playing
+                    }
+                    Keycode::C => {
+                        w_state.change_midi_channel();
+                        info!(
+                            "Changing MIDI channel to {}",
+                            w_state.midi_channel + 1
+                        );
+                    }
+                    Keycode::Equal => w_state.increase_bpm(),
+                    Keycode::Minus => w_state.decrease_bpm(),
+                    Keycode::R => {
+                        w_state.mixer.increase_ratio();
+                    }
+                    Keycode::F => {
+                        w_state.mixer.decrease_ratio();
+                    }
+                    Keycode::Up => match w_state.active_sequencer {
+                        SequencerSlot::Left => {
+                            w_state.left_sequencer.increase_steps();
+                        }
+                        SequencerSlot::Right => {
+                            w_state.right_sequencer.increase_steps()
+                        }
+                    },
+                    Keycode::Down => match w_state.active_sequencer {
+                        SequencerSlot::Left => {
+                            w_state.left_sequencer.decrease_steps()
+                        }
+                        SequencerSlot::Right => {
+                            w_state.right_sequencer.decrease_steps()
+                        }
+                    },
+                    Keycode::Right => match w_state.active_sequencer {
+                        SequencerSlot::Left => {
+                            w_state.left_sequencer.increase_pulses()
+                        }
+                        SequencerSlot::Right => {
+                            w_state.right_sequencer.increase_pulses()
+                        }
+                    },
+                    Keycode::Left => match w_state.active_sequencer {
+                        SequencerSlot::Left => {
+                            w_state.left_sequencer.decrease_pulses()
+                        }
+                        SequencerSlot::Right => {
+                            w_state.right_sequencer.decrease_pulses()
+                        }
+                    },
+                    Keycode::RightBracket => match w_state.active_sequencer {
+                        SequencerSlot::Left => {
+                            w_state.left_sequencer.increase_phase()
+                        }
+                        SequencerSlot::Right => {
+                            w_state.right_sequencer.increase_phase()
+                        }
+                    },
+                    Keycode::LeftBracket => match w_state.active_sequencer {
+                        SequencerSlot::Left => {
+                            w_state.left_sequencer.decrease_phase()
+                        }
+                        SequencerSlot::Right => {
+                            w_state.right_sequencer.decrease_phase()
+                        }
+                    },
+                    Keycode::W => match w_state.active_sequencer {
+                        SequencerSlot::Left => {
+                            w_state.left_sequencer.change_pitch(1)
+                        }
+                        SequencerSlot::Right => {
+                            w_state.right_sequencer.change_pitch(1)
+                        }
+                    },
+                    Keycode::S => match w_state.active_sequencer {
+                        SequencerSlot::Left => {
+                            w_state.left_sequencer.change_pitch(-1)
+                        }
+                        SequencerSlot::Right => {
+                            w_state.right_sequencer.change_pitch(-1)
+                        }
+                    },
+                    Keycode::D => match w_state.active_sequencer {
+                        SequencerSlot::Left => {
+                            w_state.left_sequencer.change_pitch(12)
+                        }
+                        SequencerSlot::Right => {
+                            w_state.right_sequencer.change_pitch(12)
+                        }
+                    },
+                    Keycode::A => match w_state.active_sequencer {
+                        SequencerSlot::Left => {
+                            w_state.left_sequencer.change_pitch(-12)
+                        }
+                        SequencerSlot::Right => {
+                            w_state.right_sequencer.change_pitch(-12)
+                        }
+                    },
+                    Keycode::Tab => w_state.switch_active_sequencer(),
+                    _ => {}
+                };
+            }
+
+            (w_state.bpm, w_state.midi_channel)
+        };
+
+        // The engine keeps its own copy of both, and previously handled the
+        // channel key itself — two counters that only stayed in step by luck.
+        self.send_engine(PlaybackCommand::SetBPM(bpm));
+        self.send_engine(PlaybackCommand::SetMidiChannel(midi_channel));
+
         self.update_gui().await;
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
@@ -245,7 +274,7 @@ impl PlaybackHandler {
             if let Err(e) = tx.try_send(GuiMessage::ReceivedEvent(
                 Event::StateChanged(state.clone()),
             )) {
-                error!("Error sending Message to GUI: {:?}", e);
+                error!("Error sending Message to GUI: {e:?}");
             }
         }
     }

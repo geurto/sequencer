@@ -10,8 +10,17 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::playback::state::{
     MidiEventType, PlaybackCommand, PlaybackStatus, PolyphonicSequence,
-    TimedEvent, TICKS_PER_QUARTER_NOTE,
+    TimedEvent, TICKS_PER_STEP,
 };
+
+const NOTE_ON: u8 = 0x90;
+const NOTE_OFF: u8 = 0x80;
+const CONTROL_CHANGE: u8 = 0xB0;
+const CC_ALL_SOUND_OFF: u8 = 120;
+const CC_ALL_NOTES_OFF: u8 = 123;
+
+const MIDI_CHANNELS: u8 = 16;
+const MAX_MIDI_PITCH: u8 = 127;
 
 pub struct PlaybackEngine {
     rx_command: Receiver<PlaybackCommand>,
@@ -25,6 +34,13 @@ pub struct PlaybackEngine {
     next_note_tick: f64,
     bpm: f64,
     midi_channel: u8,
+
+    /// Bit `c` of `sounding[p]` is set while pitch `p` is held on channel `c`.
+    ///
+    /// Tracked so that notes can be released *explicitly*: CC 123 is advisory
+    /// and some synths ignore it, and a mid-note channel switch would otherwise
+    /// orphan whatever is still held on the previous channel.
+    sounding: [u16; 128],
 
     last_update_time: Instant,
 }
@@ -48,6 +64,8 @@ impl PlaybackEngine {
             bpm: 120.,
             midi_channel: 0,
 
+            sounding: [0; 128],
+
             last_update_time: Instant::now(),
         }
     }
@@ -64,50 +82,21 @@ impl PlaybackEngine {
             while let Ok(cmd) = self.rx_command.try_recv() {
                 match cmd {
                     PlaybackCommand::LoadSequence(seq) => {
-                        info!(
-                            "Engine received new sequence of length {}",
-                            seq.events.len()
-                        );
-
-                        self.all_notes_off();
-
-                        if self.sequence.total_ticks > 0 && seq.total_ticks > 0
-                        {
-                            let length_ratio = seq.total_ticks as f64
-                                / self.sequence.total_ticks as f64;
-
-                            self.current_tick *= length_ratio;
-                            self.next_event_index = 0;
-                            while let Some(event) =
-                                seq.events.get(self.next_event_index)
-                            {
-                                if (event.tick as f64) < self.current_tick {
-                                    // Changed to strictly less than for safety
-                                    self.next_event_index += 1;
-                                } else {
-                                    break;
-                                }
-                            }
-                            let ticks_per_16th =
-                                TICKS_PER_QUARTER_NOTE as f64 / 4.0;
-                            let current_16th_index =
-                                (self.current_tick / ticks_per_16th).ceil();
-                            self.next_note_tick =
-                                current_16th_index * ticks_per_16th;
-                        } else {
-                            self.current_tick = 0.0;
-                            self.next_event_index = 0;
-                            self.next_note_tick = 0.0;
-                        }
-
-                        self.sequence = seq;
+                        self.load_sequence(seq)
                     }
                     PlaybackCommand::SetMidiChannel(channel) => {
-                        self.midi_channel = channel
+                        let channel = channel % MIDI_CHANNELS;
+                        if channel != self.midi_channel {
+                            // Release on the old channel first, or those notes
+                            // can never be addressed again.
+                            self.release_all_notes();
+                            self.midi_channel = channel;
+                        }
                     }
                     PlaybackCommand::SetBPM(bpm) => self.bpm = bpm,
                     PlaybackCommand::SetOutputConnection(conn) => {
-                        self.midi_conn = conn
+                        self.release_all_notes();
+                        self.midi_conn = conn;
                     }
                 }
             }
@@ -118,18 +107,18 @@ impl PlaybackEngine {
 
             if keys != last_keys {
                 let diff: Vec<_> =
-                    keys.difference(&last_keys).cloned().collect();
+                    keys.difference(&last_keys).copied().collect();
 
                 // Handle playback changes here to save time (vs Engine->StateHandler->Engine)
-                for key in diff.clone() {
-                    match key {
-                        Keycode::Space => self.is_playing = !self.is_playing,
-                        Keycode::C => {
-                            self.midi_channel = (self.midi_channel + 1) % 16
+                for key in &diff {
+                    if *key == Keycode::Space {
+                        self.is_playing = !self.is_playing;
+                        if !self.is_playing {
+                            // Otherwise whatever was mid-note stays held for as
+                            // long as playback is paused.
+                            self.release_all_notes();
                         }
-
-                        _ => {}
-                    };
+                    }
                 }
                 if let Err(e) =
                     self.tx_status.send(PlaybackStatus::InputChanged(diff))
@@ -149,41 +138,39 @@ impl PlaybackEngine {
 
             if self.is_playing {
                 let ticks_per_second =
-                    (self.bpm / 60.0) * TICKS_PER_QUARTER_NOTE as f64;
+                    (self.bpm / 60.0) * f64::from(TICKS_PER_STEP * 4);
                 self.current_tick +=
                     delta_time.as_secs_f64() * ticks_per_second;
 
                 // Send NotePlayed to update GUI
                 if self.current_tick > self.next_note_tick {
+                    let step = (self.current_tick / f64::from(TICKS_PER_STEP))
+                        as usize;
                     if let Err(e) =
-                        self.tx_status.send(PlaybackStatus::NotePlayed(
-                            self.current_tick as usize
-                                / (TICKS_PER_QUARTER_NOTE as usize / 4),
-                        ))
+                        self.tx_status.send(PlaybackStatus::NotePlayed(step))
                     {
                         error!("Error sending PlaybackStatus: {e}");
                     }
-                    self.next_note_tick += TICKS_PER_QUARTER_NOTE as f64 / 4.;
+                    self.next_note_tick += f64::from(TICKS_PER_STEP);
                 }
 
                 // Loop sequence
-                if self.current_tick >= self.sequence.total_ticks as f64 {
-                    self.current_tick -= self.sequence.total_ticks as f64;
+                let total_ticks = f64::from(self.sequence.total_ticks());
+                if self.current_tick >= total_ticks {
+                    self.current_tick -= total_ticks;
                     self.next_event_index = 0;
-                    self.next_note_tick -= self.sequence.total_ticks as f64;
+                    self.next_note_tick -= total_ticks;
                 }
 
-                if !self.sequence.events.is_empty() {
-                    // Process sequence events
-                    while let Some(&event) =
-                        self.sequence.events.get(self.next_event_index)
-                    {
-                        if event.tick as f64 <= self.current_tick {
-                            self.process_event(&event);
-                            self.next_event_index += 1;
-                        } else {
-                            break;
-                        }
+                // Process sequence events
+                while let Some(&event) =
+                    self.sequence.events().get(self.next_event_index)
+                {
+                    if f64::from(event.tick) <= self.current_tick {
+                        self.process_event(&event);
+                        self.next_event_index += 1;
+                    } else {
+                        break;
                     }
                 }
             }
@@ -192,35 +179,83 @@ impl PlaybackEngine {
         }
     }
 
-    fn process_event(&mut self, timed_event: &TimedEvent) {
-        const NOTE_ON: u8 = 0x90;
-        const NOTE_OFF: u8 = 0x80;
+    fn load_sequence(&mut self, seq: PolyphonicSequence) {
+        info!(
+            "Engine received new sequence of length {}",
+            seq.events().len()
+        );
 
+        self.release_all_notes();
+
+        if self.sequence.total_ticks() > 0 && seq.total_ticks() > 0 {
+            let length_ratio = f64::from(seq.total_ticks())
+                / f64::from(self.sequence.total_ticks());
+
+            self.current_tick *= length_ratio;
+            self.next_event_index = 0;
+            while let Some(event) = seq.events().get(self.next_event_index) {
+                if f64::from(event.tick) < self.current_tick {
+                    self.next_event_index += 1;
+                } else {
+                    break;
+                }
+            }
+            let current_step =
+                (self.current_tick / f64::from(TICKS_PER_STEP)).ceil();
+            self.next_note_tick = current_step * f64::from(TICKS_PER_STEP);
+        } else {
+            self.current_tick = 0.0;
+            self.next_event_index = 0;
+            self.next_note_tick = 0.0;
+        }
+
+        self.sequence = seq;
+    }
+
+    fn process_event(&mut self, timed_event: &TimedEvent) {
+        let channel = self.midi_channel;
         let message = match timed_event.event {
             MidiEventType::NoteOn { pitch, velocity } => {
-                [NOTE_ON | self.midi_channel, pitch, velocity]
+                let pitch = pitch.min(MAX_MIDI_PITCH);
+                self.sounding[pitch as usize] |= 1 << channel;
+                [NOTE_ON | channel, pitch, velocity.min(MAX_MIDI_PITCH)]
             }
             MidiEventType::NoteOff { pitch } => {
-                [NOTE_OFF | self.midi_channel, pitch, 0]
+                let pitch = pitch.min(MAX_MIDI_PITCH);
+                self.sounding[pitch as usize] &= !(1 << channel);
+                [NOTE_OFF | channel, pitch, 0]
             }
         };
 
-        self.midi_conn
-            .send(&message)
-            .unwrap_or_else(|e| log::error!("MIDI send error: {}", e));
+        self.send(&message);
     }
 
-    fn all_notes_off(&mut self) {
-        const CC: u8 = 0xB0;
-        const ALL_NOTES_OFF: u8 = 123;
+    /// Explicitly release every note this engine has started and not yet
+    /// stopped, on whichever channel it was started on.
+    fn release_all_notes(&mut self) {
+        for pitch in 0..self.sounding.len() {
+            let held = self.sounding[pitch];
+            if held == 0 {
+                continue;
+            }
+            for channel in 0..MIDI_CHANNELS {
+                if held & (1 << channel) != 0 {
+                    self.send(&[NOTE_OFF | channel, pitch as u8, 0]);
+                }
+            }
+            self.sounding[pitch] = 0;
+        }
 
-        let _ =
-            self.midi_conn
-                .send(&[CC | self.midi_channel, ALL_NOTES_OFF, 0]);
+        // Belt and braces for anything the engine did not start itself (e.g. a
+        // sequence swapped out underneath a synth that missed a Note-Off).
+        let channel = self.midi_channel;
+        self.send(&[CONTROL_CHANGE | channel, CC_ALL_NOTES_OFF, 0]);
+        self.send(&[CONTROL_CHANGE | channel, CC_ALL_SOUND_OFF, 0]);
+    }
 
-        const ALL_SOUND_OFF: u8 = 120;
-        let _ =
-            self.midi_conn
-                .send(&[CC | self.midi_channel, ALL_SOUND_OFF, 0]);
+    fn send(&mut self, message: &[u8]) {
+        if let Err(e) = self.midi_conn.send(message) {
+            error!("MIDI send error: {e}");
+        }
     }
 }
