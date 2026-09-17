@@ -92,8 +92,11 @@ async fn main() -> Result<()> {
     tokio::spawn(async move { playback_handler.run().await });
 
     // Synchronous playback engine that handles MIDI control
-    let playback_engine =
-        PlaybackEngine::new(rx_playback_cmd, tx_playback_status, midi_conn);
+    let playback_engine = PlaybackEngine::new(
+        rx_playback_cmd,
+        tx_playback_status,
+        Box::new(midi_conn),
+    );
     thread::spawn(move || {
         playback_engine.run();
     });

@@ -10,19 +10,24 @@ recommendations but is referenced where it constrains the architecture.
 
 > ### ⚠️ Implementation status — read this first
 >
-> **Roadmap step 1 (§A1 bugs, §A5 manifest, §A6 tooling) has been implemented.** The findings in
-> those sections describe the code *as audited*, and are kept because they explain why each fix
-> looks the way it does — but they no longer describe the current tree. Do not re-fix them.
+> **Roadmap steps 1 and 2 have been implemented** — §A1 bugs, §A5 manifest, §A6 tooling, and §A7
+> testability. Those sections describe the code *as audited*, and are kept because they explain why
+> each fix looks the way it does — but they no longer describe the current tree. Do not re-fix them.
 >
 > Still outstanding and unchanged: **§A2** (concurrency model), **§A3** (platform coupling),
-> **§A4** (edition 2024), **§A7** (`MidiSink`/`Clock` injection), and all of **Part B** and
-> **Part C**. Those are the live work items.
+> **§A4** (edition 2024), and all of **Part B** and **Part C**. Those are the live work items.
 >
-> What landed: the three mixer bugs, the silent-startup bug, the A1.5 list, unused-dependency
+> Step 1 landed the three mixer bugs, the silent-startup bug, the A1.5 list, unused-dependency
 > removal, `rust-version = "1.87"` (verified against a real 1.87.0 toolchain), a release profile,
 > a stable-only `rustfmt.toml`, GitHub Actions CI, and a Dockerfile that builds and no longer ships
-> a root password. Test count went from 1 to 21; `cargo clippy --all-targets -- -D warnings` is
-> clean. See §Changelog at the end for the detail.
+> a root password.
+>
+> Step 2 introduced `MidiSink` and `Clock` and split the pure sequencing core (`Transport`) out of
+> the platform driver (`PlaybackEngine`). **`playback/transport.rs` is the file that becomes
+> `seq-core` in §B3** — it already has no channels, no threads and no input device.
+>
+> Tests: 1 → 63 (plus 2 doctests). `cargo clippy --all-targets -- -D warnings` is clean. See
+> §Changelog at the end for the detail.
 
 ---
 
@@ -713,11 +718,7 @@ transformer three hops away. That's the whole point.
 Each step is independently shippable and leaves the tree working.
 
 1. ~~**Bug fixes + hygiene** (§A1, §A5, §A6).~~ **Done** — see §Changelog.
-2. **Testability** (§A7). Introduce `MidiSink` + `Clock` traits so the engine becomes a pure
-   function of (sequence, clock advances) → MIDI bytes. Do this *before* the big refactor so it can
-   catch regressions. Partially started: the mixer and generators now have unit tests, but the
-   engine still owns a real `MidiOutputConnection` and a real `Instant`, so nothing in
-   `playback/engine.rs` is covered.
+2. ~~**Testability** (§A7).~~ **Done** — see §Changelog.
 3. **Edition 2024 + `[lints]`** (§A4). Mostly `cargo fix --edition`; watch the `impl Future` in the
    `Sequencer` trait.
 4. **Workspace split, extract `seq-core` as `no_std`** (§B3). The big one. Integer timing (§A2.5),
@@ -732,6 +733,93 @@ Each step is independently shippable and leaves the tree working.
 
 Steps 1–3 are a weekend. Step 4 is the real investment, and it's the one that makes 6, 7 and 8
 straightforward instead of painful.
+
+---
+
+## Changelog — roadmap step 2 (implemented)
+
+### The seam (§A7)
+
+`playback/engine.rs` used to hold the play position, the event cursor, a real `MidiOutputConnection`,
+a real `Instant`, a command channel and an X11 keyboard grab, all in one `run()` loop. It is now two
+pieces:
+
+- **`playback/transport.rs` — `Transport<S: MidiSink>`.** The sequencing core: play position, event
+  dispatch, note bookkeeping. No channels, no threads, no input device, no `Instant`. Driven purely
+  by `advance_to(now_us)`, which makes playback a function of (sequence, clock readings) → MIDI
+  bytes. **This is the file that becomes `seq-core` in §B3.**
+- **`playback/engine.rs` — `PlaybackEngine<C: Clock>`.** The platform driver: command channel,
+  keyboard poll, sleep, and the `NotePlayed` status feed. Its loop body is factored into `update()`
+  so everything except the keyboard poll can be driven under test.
+
+New traits, both with a real implementation and a test double:
+
+| Trait | Production | Test double |
+|---|---|---|
+| `MidiSink` (`playback/sink.rs`) | `MidiOutputConnection`, plus a blanket impl for `Box<T>` | `RecordingSink` — captures messages; clones share one recording, so a test keeps a handle after handing the sink over. `RecordingSink::failing` exercises error paths. |
+| `Clock` (`playback/clock.rs`) | `SystemClock` (`Instant`-based) | `ManualClock` — moves only when told; clones share one timeline. |
+
+`SendError` mirrors `midir::SendError` but names no backend types and carries `&'static str` rather
+than `String`, so it stays allocation-free for the eventual `no_std` core.
+
+`PlaybackCommand::SetOutputConnection` now carries a `BoxedSink` rather than a `MidiOutputConnection`
+— the output is swapped at runtime, so it cannot be a type parameter, and boxing is what keeps the
+command type free of midir.
+
+### Simplifications that fell out
+
+- **`next_note_tick` is gone.** The GUI play head was driven by a second counter kept alongside the
+  play position, adjusted by `-= total_ticks` on loop and `.ceil()` on load. It is now derived:
+  `Transport::current_step()`, with the engine reporting on change. One less thing to desync.
+- **The engine's duplicate `midi_channel` handling is gone** — `set_midi_channel` is the only path.
+- **Long stalls no longer burst.** `wrap_around` discards whole laps (`floor(tick / total)`) instead
+  of subtracting one length, so a stalled thread cannot leave the head past the end and replay the
+  entire sequence on each following call.
+- **Loading a sequence re-seeks the event cursor** (`partition_point`), so a swap to a
+  different-length sequence resumes at the rescaled head instead of replaying everything up to it.
+
+### Tests: 21 → 63 (plus 2 doctests)
+
+Every new behavioural test was checked by mutation — reintroducing the behaviour it guards and
+confirming it fails:
+
+| Mutation | Caught by |
+|---|---|
+| Pause stops releasing held notes | `test_pause_releases_sounding_notes`, `test_notes_balance_over_many_loops` |
+| Wrap subtracts one lap instead of all | `test_stall_leaves_the_head_inside_the_sequence` |
+| Load skips the cursor re-seek | `test_loading_a_longer_sequence_does_not_burst` |
+| Pitch/velocity masking removed | `test_out_of_range_pitch_and_velocity_are_masked` |
+| Channel change skips the release | `test_channel_change_releases_on_the_old_channel` |
+| Step reporting loses its dedup | `test_each_step_is_reported_exactly_once` |
+| `SetBPM` / `SetOutputConnection` dropped | `test_commands_reach_the_transport`, `test_switching_output_moves_playback_to_the_new_sink` |
+
+Property tests (`proptest`, a dev-dependency — it does not enter the shipped binary):
+
+- `prop_stopping_never_leaves_a_note_hanging` — for arbitrary event lists (unbalanced, out of order,
+  past the end) and arbitrary clock behaviour (stalls, repeats, going backwards), stopping must
+  leave nothing ringing. A hung MIDI note is the worst failure this program has.
+- `prop_play_head_stays_inside_the_sequence`.
+- `prop_mixed_sequences_release_every_note`, `prop_mixed_events_are_sorted_and_in_range`,
+  `prop_velocities_are_audible_and_in_range`.
+- `prop_new_always_sorts` — the `PolyphonicSequence` invariant from step 1.
+
+Writing the ringing check surfaced a modelling subtlety worth keeping in mind: counting Note-On/Off
+pairs is the *wrong* model for arbitrary input, because a looping sequence can re-strike a held pitch
+and a synth has only one voice per pitch, so one Note-Off correctly releases several Note-Ons. The
+property models held notes as a set, as a synth would; the counter version is still used for the
+well-formed mixer sequences, where it is exactly what catches a double-offset gate.
+
+### Known gaps left deliberately
+
+- **Timing is still `f64` tick accumulation.** Integer timing is §A2.5 and was left alone so this
+  step stayed a refactor rather than a behaviour change. Writing the tests did expose the fragility
+  first-hand: when a sequence swap lands the play head exactly on an event's tick, whether that event
+  fires depends on float rounding. `test_loading_a_longer_sequence_does_not_burst` deliberately lands
+  mid-step to avoid it. That is more evidence for the integer rewrite, not a new problem.
+- **`run()` itself is still untested** — infinite loop plus `DeviceState::new()`, which needs a
+  display server. Everything it calls is covered; removing `device_query` is §A3.
+- The mid-bar sequence swap and its `current_tick` rescaling are unchanged. §C2 replaces both with a
+  bar-boundary swap; the tests pin current behaviour so that change is visible when it happens.
 
 ---
 

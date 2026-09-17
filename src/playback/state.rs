@@ -1,7 +1,7 @@
 use device_query::Keycode;
 use log::info;
-use midir::MidiOutputConnection;
 
+use crate::playback::engine::BoxedSink;
 use crate::{EuclideanSequencerState, MixerState};
 
 pub const TICKS_PER_QUARTER_NOTE: u32 = 480;
@@ -23,7 +23,7 @@ impl MidiEventType {
     /// Tie-break for events landing on the same tick: releases sort before
     /// attacks, so a repeated pitch is not silenced by its own predecessor's
     /// Note-Off.
-    fn order(self) -> u8 {
+    pub(crate) fn order(self) -> u8 {
         match self {
             MidiEventType::NoteOff { .. } => 0,
             MidiEventType::NoteOn { .. } => 1,
@@ -86,7 +86,7 @@ pub enum PlaybackCommand {
     LoadSequence(PolyphonicSequence),
     SetMidiChannel(u8),
     SetBPM(f64),
-    SetOutputConnection(MidiOutputConnection),
+    SetOutputConnection(BoxedSink),
 }
 
 // Data FROM the playback thread TO the UI
@@ -265,5 +265,54 @@ mod tests {
         let mut state = SharedState::new(MIN_BPM);
         state.decrease_bpm();
         assert_eq!(state.bpm, MIN_BPM);
+    }
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// However events are handed to it, `PolyphonicSequence` must come out
+        /// sorted — the engine dispatches by walking the list and stopping at
+        /// the first event in the future, so an unsorted list stalls playback
+        /// behind the out-of-order entry rather than merely reordering notes.
+        #[test]
+        fn prop_new_always_sorts(
+            events in proptest::collection::vec(
+                (0u32..1_000, 0u8..=127, any::<bool>()),
+                0..50,
+            ),
+        ) {
+            let events: Vec<TimedEvent> = events
+                .into_iter()
+                .map(|(tick, pitch, is_on)| TimedEvent {
+                    tick,
+                    event: if is_on {
+                        MidiEventType::NoteOn { pitch, velocity: 100 }
+                    } else {
+                        MidiEventType::NoteOff { pitch }
+                    },
+                })
+                .collect();
+            let count = events.len();
+
+            let sequence = PolyphonicSequence::new(events, 1_000);
+
+            prop_assert_eq!(sequence.events().len(), count, "events were lost");
+            prop_assert!(
+                sequence.events().windows(2).all(|w| w[0].tick <= w[1].tick),
+                "not sorted by tick"
+            );
+            // At equal ticks, releases must come first.
+            prop_assert!(
+                sequence.events().windows(2).all(|w| {
+                    w[0].tick != w[1].tick
+                        || w[0].event.order() <= w[1].event.order()
+                }),
+                "a Note-On sorted before a Note-Off at the same tick"
+            );
+        }
     }
 }

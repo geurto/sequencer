@@ -215,7 +215,7 @@ mod tests {
     use std::collections::HashMap;
 
     /// Build a sequence from pitches; `0` is a rest.
-    fn sequence(pitches: &[u8]) -> Sequence {
+    pub(super) fn sequence(pitches: &[u8]) -> Sequence {
         Sequence {
             notes: pitches
                 .iter()
@@ -230,7 +230,7 @@ mod tests {
         }
     }
 
-    fn mixer_with(a: Sequence, b: Sequence, ratio: f32) -> Mixer {
+    pub(super) fn mixer_with(a: Sequence, b: Sequence, ratio: f32) -> Mixer {
         let (_tx_seq, rx_seq) = mpsc::channel(1);
         let (tx_poly, _rx_poly) = mpsc::channel(1);
         let mut mixer = Mixer::new(
@@ -395,5 +395,86 @@ mod tests {
     fn test_empty_sequence_is_silent_rather_than_panicking() {
         let mixed = mixer_with(Sequence::empty(), sequence(&[60]), 0.5).mix();
         assert!(mixed.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::tests::{mixer_with, sequence};
+    use crate::playback::state::MidiEventType;
+    use proptest::prelude::*;
+    use std::collections::BTreeSet;
+
+    /// Sequences of 1..=16 steps; pitch 0 is a rest.
+    fn any_pitches() -> impl Strategy<Value = Vec<u8>> {
+        proptest::collection::vec(0u8..=127, 1..=16)
+    }
+
+    proptest! {
+        /// Whatever the two sequencers produce and wherever the crossfade sits,
+        /// the mixer must not emit a sequence that leaves a note ringing: every
+        /// pitch it starts is released before the loop point.
+        #[test]
+        fn prop_mixed_sequences_release_every_note(
+            left in any_pitches(),
+            right in any_pitches(),
+            ratio in 0.0f32..=1.0,
+        ) {
+            let mixed = mixer_with(sequence(&left), sequence(&right), ratio).mix();
+
+            let mut held = BTreeSet::new();
+            for event in mixed.events() {
+                match event.event {
+                    MidiEventType::NoteOn { pitch, .. } => { held.insert(pitch); }
+                    MidiEventType::NoteOff { pitch } => { held.remove(&pitch); }
+                }
+            }
+
+            prop_assert!(held.is_empty(), "pitches left ringing: {:?}", held);
+        }
+
+        /// Every event must fall inside the loop. The engine restarts its
+        /// cursor on wrap, so anything at or past `total_ticks` is unreachable.
+        #[test]
+        fn prop_mixed_events_are_sorted_and_in_range(
+            left in any_pitches(),
+            right in any_pitches(),
+            ratio in 0.0f32..=1.0,
+        ) {
+            let mixed = mixer_with(sequence(&left), sequence(&right), ratio).mix();
+
+            prop_assert!(
+                mixed.events().windows(2).all(|w| w[0].tick <= w[1].tick),
+                "events are not sorted by tick"
+            );
+            for event in mixed.events() {
+                prop_assert!(
+                    event.tick < mixed.total_ticks().max(1),
+                    "event at {} outside a {}-tick sequence",
+                    event.tick,
+                    mixed.total_ticks()
+                );
+            }
+        }
+
+        /// Velocities must stay inside the MIDI range, and a struck note must
+        /// never be emitted silently.
+        #[test]
+        fn prop_velocities_are_audible_and_in_range(
+            left in any_pitches(),
+            right in any_pitches(),
+            ratio in 0.0f32..=1.0,
+        ) {
+            let mixed = mixer_with(sequence(&left), sequence(&right), ratio).mix();
+
+            for event in mixed.events() {
+                if let MidiEventType::NoteOn { velocity, .. } = event.event {
+                    prop_assert!(
+                        (1..=127).contains(&velocity),
+                        "velocity {velocity} outside 1..=127"
+                    );
+                }
+            }
+        }
     }
 }

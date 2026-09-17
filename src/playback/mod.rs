@@ -1,6 +1,9 @@
+pub mod clock;
 pub mod engine;
 pub mod midi;
+pub mod sink;
 pub mod state;
+pub mod transport;
 
 use device_query::Keycode;
 use log::{error, info, warn};
@@ -116,7 +119,7 @@ impl PlaybackHandler {
                 match midi_utils::create_connection(&out_port) {
                     Ok(conn_out) => {
                         self.send_engine(PlaybackCommand::SetOutputConnection(
-                            conn_out,
+                            Box::new(conn_out),
                         ));
 
                         if let Some(mut tx) =
