@@ -1,20 +1,18 @@
 //! The synchronous driver around [`Transport`].
 //!
 //! Everything here is the *platform* half: the command channel, the keyboard
-//! poll and the sleep. The musical half lives in [`Transport`], which this type
-//! simply feeds with clock readings.
+//! poll and the sleep. The musical half lives in [`seq_core::Transport`],
+//! which this type simply feeds with clock readings.
 
 use device_query::{DeviceQuery, DeviceState, Keycode};
 use log::{error, info};
+use seq_core::{Clock, MidiSink, SystemClock, Transport};
 use std::collections::HashSet;
 use std::fmt;
 use std::{sync::mpsc::Receiver, time::Duration};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::playback::clock::{Clock, SystemClock};
-use crate::playback::sink::MidiSink;
 use crate::playback::state::{PlaybackCommand, PlaybackStatus};
-use crate::playback::transport::Transport;
 
 /// How long the driver sleeps between updates. Sets the playback timing
 /// resolution, and with it the audible jitter floor.
@@ -25,6 +23,18 @@ const TICK_INTERVAL: Duration = Duration::from_millis(1);
 /// Boxed rather than a type parameter because the output is swapped at runtime
 /// when the user picks a different MIDI port.
 pub type BoxedSink = Box<dyn MidiSink + Send>;
+
+/// The transport keeps tempo in integer milli-BPM; the UI deals in `f64`.
+fn bpm_to_milli(bpm: f64) -> u32 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamped to a u32-representable, non-negative range first"
+    )]
+    {
+        (bpm.clamp(0.0, 4_000_000.0) * 1000.0).round() as u32
+    }
+}
 
 pub struct PlaybackEngine<C: Clock = SystemClock> {
     transport: Transport<BoxedSink>,
@@ -115,12 +125,14 @@ impl<C: Clock> PlaybackEngine<C> {
                         "Engine received new sequence of {} events",
                         sequence.events().len()
                     );
-                    self.transport.load_sequence(sequence);
+                    self.transport.load_sequence(*sequence);
                 }
                 PlaybackCommand::SetMidiChannel(channel) => {
                     self.transport.set_midi_channel(channel);
                 }
-                PlaybackCommand::SetBPM(bpm) => self.transport.set_bpm(bpm),
+                PlaybackCommand::SetBPM(bpm) => {
+                    self.transport.set_bpm_milli(bpm_to_milli(bpm));
+                }
                 PlaybackCommand::SetOutputConnection(sink) => {
                     self.transport.set_sink(sink);
                 }
@@ -161,10 +173,9 @@ impl<C: Clock> PlaybackEngine<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::playback::clock::ManualClock;
-    use crate::playback::sink::RecordingSink;
-    use crate::playback::state::{
-        MidiEventType, PolyphonicSequence, TICKS_PER_STEP, TimedEvent,
+    use seq_core::{
+        EventVec, ManualClock, MidiEventType, PolyphonicSequence,
+        RecordingSink, TICKS_PER_STEP, TimedEvent,
     };
     use std::sync::mpsc::{Sender as SyncSender, channel as sync_channel};
     use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -237,20 +248,24 @@ mod tests {
     }
 
     fn sequence(pitches: &[u8]) -> PolyphonicSequence {
-        let mut events = Vec::new();
+        let mut events = EventVec::new();
         for (step, &pitch) in pitches.iter().enumerate() {
             let tick = u32::try_from(step).unwrap() * TICKS_PER_STEP;
-            events.push(TimedEvent {
-                tick,
-                event: MidiEventType::NoteOn {
-                    pitch,
-                    velocity: 100,
-                },
-            });
-            events.push(TimedEvent {
-                tick: tick + TICKS_PER_STEP - 1,
-                event: MidiEventType::NoteOff { pitch },
-            });
+            events
+                .push(TimedEvent {
+                    tick,
+                    event: MidiEventType::NoteOn {
+                        pitch,
+                        velocity: 100,
+                    },
+                })
+                .unwrap();
+            events
+                .push(TimedEvent {
+                    tick: tick + TICKS_PER_STEP - 1,
+                    event: MidiEventType::NoteOff { pitch },
+                })
+                .unwrap();
         }
         PolyphonicSequence::new(
             events,
@@ -259,10 +274,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(
-        clippy::float_cmp,
-        reason = "the BPM is stored verbatim, so the comparison is exact"
-    )]
     fn test_commands_reach_the_transport() {
         let mut harness = Harness::new();
 
@@ -270,14 +281,22 @@ mod tests {
         harness.send(PlaybackCommand::SetMidiChannel(7));
         harness.engine.handle_commands();
 
-        assert_eq!(harness.engine.transport.bpm(), 90.0);
+        assert_eq!(harness.engine.transport.bpm_milli(), 90_000);
         assert_eq!(harness.engine.transport.midi_channel(), 7);
+    }
+
+    #[test]
+    fn test_fractional_bpm_survives_the_conversion() {
+        assert_eq!(bpm_to_milli(120.5), 120_500);
+        assert_eq!(bpm_to_milli(0.0), 0);
+        assert_eq!(bpm_to_milli(-10.0), 0, "negative tempo clamps to zero");
     }
 
     #[test]
     fn test_loaded_sequence_plays() {
         let mut harness = Harness::new();
-        harness.send(PlaybackCommand::LoadSequence(sequence(&[60, 62])));
+        harness
+            .send(PlaybackCommand::LoadSequence(Box::new(sequence(&[60, 62]))));
         harness.engine.handle_commands();
         harness.engine.transport.set_playing(true);
 
@@ -299,8 +318,9 @@ mod tests {
     #[test]
     fn test_each_step_is_reported_exactly_once() {
         let mut harness = Harness::new();
-        harness
-            .send(PlaybackCommand::LoadSequence(sequence(&[60, 62, 64, 65])));
+        harness.send(PlaybackCommand::LoadSequence(Box::new(sequence(&[
+            60, 62, 64, 65,
+        ]))));
         harness.engine.handle_commands();
         harness.engine.transport.set_playing(true);
 
@@ -312,7 +332,8 @@ mod tests {
     #[test]
     fn test_paused_engine_reports_one_step_and_plays_nothing() {
         let mut harness = Harness::new();
-        harness.send(PlaybackCommand::LoadSequence(sequence(&[60, 62])));
+        harness
+            .send(PlaybackCommand::LoadSequence(Box::new(sequence(&[60, 62]))));
         harness.engine.handle_commands();
 
         harness.run_steps(4);
@@ -336,7 +357,8 @@ mod tests {
     #[test]
     fn test_switching_output_moves_playback_to_the_new_sink() {
         let mut harness = Harness::new();
-        harness.send(PlaybackCommand::LoadSequence(sequence(&[60, 62])));
+        harness
+            .send(PlaybackCommand::LoadSequence(Box::new(sequence(&[60, 62]))));
         harness.engine.handle_commands();
         harness.engine.transport.set_playing(true);
 

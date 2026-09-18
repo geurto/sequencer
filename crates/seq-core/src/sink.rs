@@ -1,20 +1,16 @@
 //! Where MIDI bytes go.
 //!
 //! The sequencing core writes through [`MidiSink`] rather than to a concrete
-//! backend, so that playback can be driven — and asserted on — without any MIDI
-//! hardware, and so that a future embedded build can substitute a UART writer
-//! for `midir`.
+//! backend, so that playback can be driven — and asserted on — without any
+//! MIDI hardware, and so an embedded build can substitute a UART writer for a
+//! desktop MIDI stack.
 
-use std::fmt;
-use std::sync::{Arc, Mutex};
-
-use midir::MidiOutputConnection;
+use core::fmt;
 
 /// Error returned by [`MidiSink::send`].
 ///
-/// Mirrors `midir::SendError` but names no backend types, which keeps the trait
-/// independent of midir. Both variants carry `&'static str` rather than a
-/// `String`, so the type stays allocation-free.
+/// Deliberately backend-agnostic and allocation-free: both variants carry
+/// `&'static str` rather than a `String`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SendError {
     InvalidData(&'static str),
@@ -32,16 +28,7 @@ impl fmt::Display for SendError {
     }
 }
 
-impl std::error::Error for SendError {}
-
-impl From<midir::SendError> for SendError {
-    fn from(error: midir::SendError) -> Self {
-        match error {
-            midir::SendError::InvalidData(msg) => SendError::InvalidData(msg),
-            midir::SendError::Other(msg) => SendError::Other(msg),
-        }
-    }
-}
+impl core::error::Error for SendError {}
 
 /// A destination for raw MIDI messages.
 pub trait MidiSink {
@@ -54,16 +41,10 @@ pub trait MidiSink {
     fn send(&mut self, message: &[u8]) -> Result<(), SendError>;
 }
 
-impl MidiSink for MidiOutputConnection {
-    fn send(&mut self, message: &[u8]) -> Result<(), SendError> {
-        // Fully qualified: an inherent `send` of the same name also exists, and
-        // `self.send(..)` inside this impl would resolve back to this method.
-        MidiOutputConnection::send(self, message).map_err(SendError::from)
-    }
-}
-
 /// Lets an owner hold a sink behind a `Box` without knowing its type — the
-/// engine swaps its output at runtime, so it cannot be generic over one.
+/// desktop engine swaps its output at runtime, so it cannot be generic over
+/// one.
+#[cfg(any(test, feature = "std"))]
 impl<T: MidiSink + ?Sized> MidiSink for Box<T> {
     fn send(&mut self, message: &[u8]) -> Result<(), SendError> {
         (**self).send(message)
@@ -76,7 +57,8 @@ impl<T: MidiSink + ?Sized> MidiSink for Box<T> {
 /// sink to the code under test:
 ///
 /// ```
-/// use sequencer::playback::sink::{MidiSink, RecordingSink};
+/// # // requires the `test-util` feature
+/// use seq_core::{MidiSink, RecordingSink};
 ///
 /// let recorder = RecordingSink::new();
 /// let mut sink = recorder.clone();
@@ -84,13 +66,15 @@ impl<T: MidiSink + ?Sized> MidiSink for Box<T> {
 ///
 /// assert_eq!(recorder.messages(), vec![vec![0x90, 60, 100]]);
 /// ```
+#[cfg(any(test, feature = "test-util"))]
 #[derive(Clone, Debug, Default)]
 pub struct RecordingSink {
-    messages: Arc<Mutex<Vec<Vec<u8>>>>,
+    messages: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
     /// When set, every `send` fails with this error instead of recording.
     failure: Option<SendError>,
 }
 
+#[cfg(any(test, feature = "test-util"))]
 impl RecordingSink {
     #[must_use]
     pub fn new() -> Self {
@@ -101,8 +85,8 @@ impl RecordingSink {
     #[must_use]
     pub fn failing(error: SendError) -> Self {
         Self {
-            messages: Arc::new(Mutex::new(Vec::new())),
             failure: Some(error),
+            ..Self::default()
         }
     }
 
@@ -128,6 +112,7 @@ impl RecordingSink {
     }
 }
 
+#[cfg(any(test, feature = "test-util"))]
 impl MidiSink for RecordingSink {
     fn send(&mut self, message: &[u8]) -> Result<(), SendError> {
         if let Some(error) = self.failure {

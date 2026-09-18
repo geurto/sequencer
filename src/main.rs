@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use env_logger::Builder;
 use log::{error, info};
+use seq_core::{Pattern, PolyphonicSequence};
 use std::{
     sync::{Arc, Mutex as SyncMutex, mpsc::channel as sync_channel},
     thread,
@@ -10,23 +11,24 @@ use tokio::{signal, sync::RwLock};
 
 use sequencer::{
     EuclideanSequencer, Gui, MidiCommand, Mixer, PlaybackEngine,
-    PlaybackHandler, PlaybackStatus, Sequence, Sequencer,
+    PlaybackHandler, PlaybackStatus,
     gui::{sequencers::euclidean::Gui as EuclideanGui, state::GuiMessage},
     midi_utils,
-    playback::state::{PolyphonicSequence, SequencerSlot, SharedState},
+    playback::midi::MidirSink,
+    playback::state::{SequencerSlot, SharedState},
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
     Builder::new().filter(None, log::LevelFilter::Info).init();
 
-    // sequences FROM sequencers TO mixer
-    let (tx_sequence, rx_sequence) =
-        mpsc::channel::<(Option<Sequence>, Option<Sequence>)>(1);
+    // patterns FROM sequencers TO mixer
+    let (tx_pattern, rx_pattern) =
+        mpsc::channel::<(Option<Pattern>, Option<Pattern>)>(1);
 
     // mixed sequence FROM mixer TO playback_handler
     let (tx_mixed_sequence, rx_mixed_sequence) =
-        mpsc::channel::<PolyphonicSequence>(1);
+        mpsc::channel::<Box<PolyphonicSequence>>(1);
 
     // MIDI messages, either GUI or playing a note
     let (tx_midi, rx_midi) = mpsc::channel::<MidiCommand>(1);
@@ -45,12 +47,12 @@ async fn main() -> Result<()> {
     let shared_state: Arc<RwLock<SharedState>> =
         Arc::new(RwLock::new(SharedState::new(120.)));
 
-    // Sequencers and mixer. Each sequencer emits its opening sequence as soon
+    // Sequencers and mixer. Each sequencer emits its opening pattern as soon
     // as it starts running, so there is nothing to prime here.
     let mut sequencer_a = EuclideanSequencer::new(
         SequencerSlot::Left,
         shared_state.clone(),
-        tx_sequence.clone(),
+        tx_pattern.clone(),
     );
     tokio::spawn(async move {
         sequencer_a.run().await;
@@ -60,12 +62,12 @@ async fn main() -> Result<()> {
     let mut sequencer_b = EuclideanSequencer::new(
         SequencerSlot::Right,
         shared_state.clone(),
-        tx_sequence.clone(),
+        tx_pattern.clone(),
     );
     tokio::spawn(async move { sequencer_b.run().await });
 
     let mut sequence_mixer =
-        Mixer::new(shared_state.clone(), rx_sequence, tx_mixed_sequence);
+        Mixer::new(shared_state.clone(), rx_pattern, tx_mixed_sequence);
     tokio::spawn(async move { sequence_mixer.run().await });
 
     // Playback
@@ -95,7 +97,7 @@ async fn main() -> Result<()> {
     let playback_engine = PlaybackEngine::new(
         rx_playback_cmd,
         tx_playback_status,
-        Box::new(midi_conn),
+        Box::new(MidirSink(midi_conn)),
     );
     thread::spawn(move || {
         playback_engine.run();

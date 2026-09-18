@@ -1,12 +1,39 @@
-[package]
-name = "sequencer"
+[workspace]
+members = ["crates/seq-core"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 # Edition 2024 needs 1.85; let-chains (used in playback/) need 1.88, which is
 # also at or above the highest MSRV in the resolved dependency graph.
 rust-version = "1.88"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# Configured at the workspace so every crate inherits the same rules via
+# `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# A wrong cast in the timing or MIDI path is silent and audible, so the casting
+# lints are kept on rather than waived along with the rest of pedantic.
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+cast_precision_loss = "warn"
+# Documenting every panic and error path is not worth it for crates with a
+# single consumer.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+
+# The desktop application: GUI, keyboard input, MIDI ports, async plumbing.
+# The platform-independent musical core lives in crates/seq-core.
+[package]
+name = "sequencer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 anyhow = "1.0.86"
@@ -16,31 +43,15 @@ iced = { version = "0.13.1", features = ["advanced", "canvas", "tokio"] }
 iced_futures = "0.13.2"
 log = "0.4.22"
 midir = "0.11.0"
-num = "0.4.3"
 rand = "0.9.1"
+seq-core = { path = "crates/seq-core", features = ["std"] }
 tokio = { version = "1.36.0", features = ["full"] }
 
 [dev-dependencies]
-proptest = "1.11.0"
+seq-core = { path = "crates/seq-core", features = ["test-util"] }
 
-# Configured here rather than as `#![warn(..)]` in lib.rs so the settings apply
-# to every target, including the binary and the tests.
-[lints.rust]
-unsafe_code = "forbid"
-missing_debug_implementations = "warn"
-
-[lints.clippy]
-pedantic = { level = "warn", priority = -1 }
-# A wrong cast in the timing or MIDI path is silent and audible, so the casting
-# lints are kept on rather than waived along with the rest of pedantic.
-cast_possible_truncation = "warn"
-cast_sign_loss = "warn"
-cast_precision_loss = "warn"
-# Documenting every panic and error path is not worth it for a binary crate
-# whose library surface has one consumer.
-missing_errors_doc = "allow"
-missing_panics_doc = "allow"
-module_name_repetitions = "allow"
+[lints]
+workspace = true
 
 [profile.release]
 lto = "thin"

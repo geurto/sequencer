@@ -25,6 +25,7 @@ WORKDIR /home/sequencer
 # Cargo.lock is copied too so the image builds the same dependency versions the
 # repository was tested against.
 COPY Cargo.toml Cargo.lock ./
+COPY crates/ ./crates/
 COPY src/ ./src/
 
 # Deliberately not built here. The arm64 image is assembled under QEMU, where

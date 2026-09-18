@@ -1,3 +1,5 @@
+use midir::MidiOutputConnection;
+use seq_core::{MidiSink, SendError};
 use tokio::sync::oneshot;
 
 #[derive(Debug)]
@@ -8,6 +10,28 @@ pub enum MidiCommand {
     SetPort {
         out_port: String,
     },
+}
+
+/// A midir-backed [`MidiSink`].
+///
+/// A newtype rather than `impl MidiSink for MidiOutputConnection`: both the
+/// trait and the type are foreign to this crate, so a direct impl would
+/// violate the orphan rule.
+pub struct MidirSink(pub MidiOutputConnection);
+
+impl std::fmt::Debug for MidirSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MidirSink(..)")
+    }
+}
+
+impl MidiSink for MidirSink {
+    fn send(&mut self, message: &[u8]) -> Result<(), SendError> {
+        self.0.send(message).map_err(|e| match e {
+            midir::SendError::InvalidData(msg) => SendError::InvalidData(msg),
+            midir::SendError::Other(msg) => SendError::Other(msg),
+        })
+    }
 }
 
 pub mod midi_utils {

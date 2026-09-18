@@ -10,7 +10,7 @@ use iced::{
 };
 
 use crate::{
-    EuclideanSequencerState, Sequence, SharedState, gui::CustomTheme,
+    EuclideanSequencerState, SharedState, gui::CustomTheme,
     playback::state::SequencerSlot,
 };
 
@@ -95,12 +95,15 @@ impl canvas::Program<Message> for Gui {
         let start_x = center.x - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
         let start_y = center.y - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
 
-        let beat_locations = (0..self.state.pulses)
-            .map(|i| {
-                (self.state.phase + (i * self.state.steps) / self.state.pulses)
-                    % self.state.steps
-            })
-            .collect::<Vec<_>>();
+        // The same generator that feeds the mixer, so the display can never
+        // disagree with what plays. Velocity is irrelevant for drawing.
+        let pattern = seq_core::euclid::pattern(
+            self.state.steps,
+            self.state.pulses,
+            self.state.phase,
+            self.state.pitch,
+            100,
+        );
 
         for row in 0..4u16 {
             for col in 0..4u16 {
@@ -121,7 +124,7 @@ impl canvas::Program<Message> for Gui {
                 frame.fill(&bg_circle, self.theme.primary_color_muted);
 
                 // pulses and current playing note
-                let color = if beat_locations.contains(&index) {
+                let color = if pattern.hit(index) {
                     self.theme.accent_color
                 } else if index >= self.state.steps {
                     self.theme.accent_color_muted
@@ -158,7 +161,7 @@ impl canvas::Program<Message> for Gui {
         );
 
         // show note info - text
-        let note_info = Sequence::midi_to_note_name(self.state.pitch);
+        let note_info = seq_core::note_name(self.state.pitch).to_string();
         let text = Text {
             content: note_info,
             position: box_center,

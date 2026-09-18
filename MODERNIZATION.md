@@ -10,13 +10,15 @@ recommendations but is referenced where it constrains the architecture.
 
 > ### ⚠️ Implementation status — read this first
 >
-> **Roadmap steps 1, 2 and 3 have been implemented** — §A1 bugs, §A5 manifest, §A6 tooling, §A7
-> testability, and §A4 edition 2024. Those sections describe the code *as audited*, and are kept
-> because they explain why each fix looks the way it does — but they no longer describe the current
-> tree. Do not re-fix them.
+> **Roadmap steps 1–4 have been implemented** — §A1 bugs, §A5 manifest, §A6 tooling, §A7
+> testability, §A4 edition 2024, and §B3's workspace split with a `no_std` `seq-core` (including
+> §A2.5's integer timing). Those sections describe the code *as audited*, and are kept because they
+> explain why each fix looks the way it does — but they no longer describe the current tree. Do not
+> re-fix them.
 >
-> Still outstanding and unchanged: **§A2** (concurrency model), **§A3** (platform coupling), and all
-> of **Part B** and **Part C**. Those are the live work items.
+> Still outstanding: **§A2** (the polling concurrency model — the loops still poll; only the
+> `f64` timing part of §A2 is done), **§A3** (the desktop binary still uses `device_query`), and
+> Part B's actual ESP32 binary plus all of **Part C**. Those are the live work items.
 >
 > Step 1 landed the three mixer bugs, the silent-startup bug, the A1.5 list, unused-dependency
 > removal, `rust-version = "1.87"` (verified against a real 1.87.0 toolchain), a release profile,
@@ -725,6 +727,7 @@ Each step is independently shippable and leaves the tree working.
 1. ~~**Bug fixes + hygiene** (§A1, §A5, §A6).~~ **Done** — see §Changelog.
 2. ~~**Testability** (§A7).~~ **Done** — see §Changelog.
 3. ~~**Edition 2024 + `[lints]`** (§A4).~~ **Done** — see §Changelog.
+4. ~~**Workspace split, extract `seq-core` as `no_std`** (§B3).~~ **Done** — see §Changelog.
 4. **Workspace split, extract `seq-core` as `no_std`** (§B3). The big one. Integer timing (§A2.5),
    fixed-capacity `Pattern`, synchronous pure generators. Desktop binary keeps working throughout.
 5. **Replace the concurrency model** (§A2). `watch` + `select!`, delete the polling loops and the
@@ -737,6 +740,100 @@ Each step is independently shippable and leaves the tree working.
 
 Steps 1–3 are a weekend. Step 4 is the real investment, and it's the one that makes 6, 7 and 8
 straightforward instead of painful.
+
+---
+
+## Changelog — roadmap step 4 (implemented)
+
+### The workspace
+
+```
+sequencer/
+├── Cargo.toml                  # workspace + the desktop package (root)
+├── crates/
+│   └── seq-core/               # #![no_std], allocation-free: the music
+│       ├── note.rs             #   Voice, Step, Pattern, note_name, NoteDuration
+│       ├── euclid.rs           #   Euclidean generator (pure fn)
+│       ├── mixer.rs            #   mix(&Pattern, &Pattern, ratio, rng) → PolyphonicSequence
+│       ├── event.rs            #   TimedEvent, PolyphonicSequence (fixed capacity)
+│       ├── transport.rs        #   integer-timed playback state machine
+│       ├── sink.rs             #   MidiSink, SendError, RecordingSink (feature-gated)
+│       └── clock.rs            #   Clock, SystemClock (std), ManualClock (test-util)
+└── src/                        # the desktop app: GUI, keyboard, midir, tokio
+```
+
+**Proven, not assumed:** `cargo check -p seq-core --target riscv32imc-unknown-none-elf
+--no-default-features` compiles clean — a bare-metal tier-2 target (the ESP32-C2/C3 architecture)
+with no `std`, no allocator and no OS. A CI job (`no-std`) now guards that property on every push,
+and the nix devshell toolchain carries the target (`flake.nix`). Lints and edition/MSRV are shared
+via `[workspace.lints]` / `[workspace.package]`.
+
+Deliberate deviations from the §B3 sketch, with reasons:
+
+- **The desktop package stays at the repo root** instead of moving to `crates/sequencer-desktop`.
+  `cargo run` keeps working, the Dockerfile keeps most of its COPY paths, and nothing musical lives
+  there anymore — `crates/sequencer-esp` can join the workspace later without another reshuffle.
+- **`seq-io` and `seq-proto` were not created.** The sink/clock traits are ~150 lines; a dedicated
+  crate per trait is ceremony until a second consumer exists. They live in `seq-core::{sink,clock}`
+  and can split out mechanically later. `seq-proto` is step 6's work.
+- **`Pattern` has no `ticks_per_step` field yet** — the mixer still assumes the global sixteenth
+  grid, and a field nothing reads would only mislead. It arrives with per-pattern resolutions.
+- **The transport still plays event lists, not patterns.** §C2's bar-boundary pattern swap changes
+  behaviour; this step was an extraction, so `PolyphonicSequence` became a fixed-capacity no_std
+  type (heapless-backed, `EVENT_CAPACITY` = 4096 events ≈ 32 KB) rather than disappearing.
+
+### Integer timing (§A2.5) — the `f64` accumulator is gone
+
+The play position is now `position: u128` in units of `1/60·10⁹` ticks: each clock delta adds
+`delta_us × bpm_milli × PPQN` exactly, wrap is a single modulo (which also subsumed the old
+"discard whole laps" logic), the sequence-length rescale is exact integer multiply-then-divide, and
+division only happens when *reading* the position. Tempo is `bpm_milli: u32` (120 BPM = 120 000);
+the desktop converts its `f64` UI value at the engine boundary. Consequences:
+
+- **No accumulated drift, ever** — pinned by a new test: 100.5 BPM for ten simulated minutes of
+  1 ms updates lands on the exactly computed tick (`test_fractional_tempo_does_not_drift`).
+- **No FPU needed in the playback path**, which is what makes the ESP32-C3/C6 (no hardware float)
+  viable without a soft-float tax on every tick.
+- The float-boundary fragility documented in step 2 (whether an event exactly on the head fires
+  depends on rounding) is gone; boundary semantics are now exact and deterministic.
+- `current_step()` is pure integer math; the `#[expect(cast_*)]` on it disappeared.
+
+Every transport test moved over unchanged in its assertions and passed against the integer
+implementation on the first run — including the hand-analysed boundary cases (`head at exactly tick
+540`) that used to sit on float rounding.
+
+### Pattern types (§B3)
+
+`Sequence`/`Note` (heap `Vec`, pitch-0-as-rest sentinel) are replaced by
+`Pattern`/`Step`/`Voice`: fixed capacity (64 steps × 4 voices), `Copy` (~1.5 KB), a rest is
+`None` rather than a magic pitch — so MIDI note 0 became a playable note — and gate length is a
+per-voice `gate_ticks` instead of a constant rediscovered in the mixer. The Euclidean generator is
+the pure `euclid::pattern(steps, pulses, phase, pitch, velocity)`; the GUI now renders from the
+same function that feeds the mixer, deleting its duplicated Bresenham. The old `Sequencer` trait
+(async, `Send`, one implementor) is deleted outright — generation is synchronous and pure, as §A4
+recommended; the per-slot polling task remains as desktop plumbing.
+
+The mixer is `mixer::mix(&Pattern, &Pattern, ratio, &mut impl Rng) → PolyphonicSequence`: same
+crossfade/collapse/gate behaviour (its tests moved 1:1), generalised to multi-voice steps, `lcm`
+inlined (the `num` dependency is gone), `sqrt` via `libm` (no_std), and the RNG injected — so mixes
+are reproducible under test for the first time. Overflowing the fixed event list degrades to
+logged silence, never a truncated list (a truncated list would drop Note-Offs and hang notes).
+
+`PolyphonicSequence` is ~32 KB inline, so on the desktop it is **boxed at channel boundaries**
+(`PlaybackCommand::LoadSequence(Box<…>)`) — clippy's `large_futures`/`large_enum_variant` caught
+this immediately, which is exactly the kind of thing those lints are for. Embedded builds keep the
+inline value and tune `EVENT_CAPACITY` down.
+
+### Verification
+
+- 68 unit/property tests + 2 doctests, all green (`--workspace`); clippy pedantic `-D warnings`
+  clean across both crates.
+- Mutation spot-checks against the *moved* suite: breaking the modulo wrap, dropping the load-time
+  `reseek`, and unclamping the mixer gate are each caught by named tests.
+- MSRV 1.88 re-verified against a real 1.88.0 toolchain across the workspace; release profile
+  builds.
+- The orphan rule forced one small desktop change: `impl MidiSink for MidiOutputConnection`
+  became the `MidirSink` newtype (both trait and type are now foreign to the desktop crate).
 
 ---
 

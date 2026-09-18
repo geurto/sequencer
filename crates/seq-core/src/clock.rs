@@ -2,12 +2,8 @@
 //!
 //! The playback loop reads the time through [`Clock`] rather than calling
 //! `Instant::now` directly, so tests can step time forward deterministically
-//! instead of sleeping, and so the eventual embedded build can substitute a
-//! hardware timer.
-
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+//! instead of sleeping, and so an embedded build can substitute a hardware
+//! timer.
 
 /// A monotonic source of elapsed microseconds.
 ///
@@ -18,26 +14,30 @@ pub trait Clock {
 }
 
 /// Wall-clock time, measured from the moment the clock was created.
+#[cfg(any(test, feature = "std"))]
 #[derive(Clone, Debug)]
 pub struct SystemClock {
-    origin: Instant,
+    origin: std::time::Instant,
 }
 
+#[cfg(any(test, feature = "std"))]
 impl SystemClock {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            origin: Instant::now(),
+            origin: std::time::Instant::now(),
         }
     }
 }
 
+#[cfg(any(test, feature = "std"))]
 impl Default for SystemClock {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(any(test, feature = "std"))]
 impl Clock for SystemClock {
     fn now_us(&self) -> u64 {
         // u64 microseconds covers ~584,000 years from the origin; saturating
@@ -52,7 +52,8 @@ impl Clock for SystemClock {
 /// handing the clock to the code under test:
 ///
 /// ```
-/// use sequencer::playback::clock::{Clock, ManualClock};
+/// # // requires the `test-util` feature
+/// use seq_core::{Clock, ManualClock};
 ///
 /// let clock = ManualClock::new();
 /// let reader = clock.clone();
@@ -60,11 +61,13 @@ impl Clock for SystemClock {
 /// clock.advance_us(250);
 /// assert_eq!(reader.now_us(), 250);
 /// ```
+#[cfg(any(test, feature = "test-util"))]
 #[derive(Clone, Debug, Default)]
 pub struct ManualClock {
-    now_us: Arc<AtomicU64>,
+    now_us: std::sync::Arc<core::sync::atomic::AtomicU64>,
 }
 
+#[cfg(any(test, feature = "test-util"))]
 impl ManualClock {
     #[must_use]
     pub fn new() -> Self {
@@ -73,7 +76,8 @@ impl ManualClock {
 
     /// Move time forward.
     pub fn advance_us(&self, us: u64) {
-        self.now_us.fetch_add(us, Ordering::Relaxed);
+        self.now_us
+            .fetch_add(us, core::sync::atomic::Ordering::Relaxed);
     }
 
     /// Move time forward by whole milliseconds.
@@ -82,9 +86,10 @@ impl ManualClock {
     }
 }
 
+#[cfg(any(test, feature = "test-util"))]
 impl Clock for ManualClock {
     fn now_us(&self) -> u64 {
-        self.now_us.load(Ordering::Relaxed)
+        self.now_us.load(core::sync::atomic::Ordering::Relaxed)
     }
 }
 

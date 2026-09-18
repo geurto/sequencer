@@ -1,20 +1,28 @@
-//! The sequencing core: play position, event dispatch and note bookkeeping.
+//! The playback core: play position, event dispatch and note bookkeeping.
 //!
 //! [`Transport`] owns no channels, no threads and no input device — it is
 //! driven entirely by [`Transport::advance_to`] and writes through a
 //! [`MidiSink`]. That makes playback a function of (sequence, clock readings)
-//! to MIDI bytes, which is what makes it testable, and it is the part that
-//! survives into a platform-independent core later.
+//! to MIDI bytes.
+//!
+//! # Timing
+//!
+//! The play position is kept as an exact integer. Each clock delta contributes
+//! `delta_us × bpm_milli × PPQN` to an accumulator in units of
+//! `1 / TICK_SCALE` ticks, where `TICK_SCALE` is the number of
+//! microsecond-milli-BPM quanta per tick (60 × 10⁹). Division only happens
+//! when reading the position out, so no error ever accumulates — and no
+//! floating-point unit is needed, which matters on the RISC-V ESP32 parts.
 
-use std::fmt;
+use core::fmt;
 
 use log::error;
 
-use crate::playback::sink::MidiSink;
-use crate::playback::state::{
+use crate::event::{
     MidiEventType, PolyphonicSequence, TICKS_PER_QUARTER_NOTE, TICKS_PER_STEP,
     TimedEvent,
 };
+use crate::sink::MidiSink;
 
 const NOTE_ON: u8 = 0x90;
 const NOTE_OFF: u8 = 0x80;
@@ -26,8 +34,10 @@ const MIDI_CHANNELS: u8 = 16;
 const MAX_MIDI_PITCH: u8 = 127;
 const MAX_MIDI_VELOCITY: u8 = 127;
 
-const SECONDS_PER_MINUTE: f64 = 60.0;
-const MICROS_PER_SECOND: f64 = 1_000_000.0;
+/// Scaled-position quanta per tick: microseconds per minute (60 × 10⁶) times
+/// the milli-BPM scaling (10³). One microsecond at 1 milli-BPM advances the
+/// accumulator by `TICKS_PER_QUARTER_NOTE`.
+const TICK_SCALE: u128 = 60_000_000_000;
 
 pub struct Transport<S: MidiSink> {
     sink: S,
@@ -35,8 +45,12 @@ pub struct Transport<S: MidiSink> {
     is_playing: bool,
     sequence: PolyphonicSequence,
     next_event_index: usize,
-    current_tick: f64,
-    bpm: f64,
+    /// Play position within the loop, in `1 / TICK_SCALE` ticks. Exact: only
+    /// ever advanced by integer increments and reduced modulo `total_scaled`.
+    position: u128,
+    /// `sequence.total_ticks() × TICK_SCALE`, cached at load.
+    total_scaled: u128,
+    bpm_milli: u32,
     midi_channel: u8,
 
     /// Bit `c` of `sounding[p]` is set while pitch `p` is held on channel `c`.
@@ -56,10 +70,10 @@ impl<S: MidiSink> fmt::Debug for Transport<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Transport")
             .field("is_playing", &self.is_playing)
-            .field("bpm", &self.bpm)
+            .field("bpm_milli", &self.bpm_milli)
             .field("midi_channel", &self.midi_channel)
             .field("step", &self.current_step())
-            .field("tick", &self.current_tick)
+            .field("tick", &self.current_tick())
             .field("events", &self.sequence.events().len())
             .field("sounding", &self.sounding_notes().count())
             .finish_non_exhaustive()
@@ -68,13 +82,15 @@ impl<S: MidiSink> fmt::Debug for Transport<S> {
 
 impl<S: MidiSink> Transport<S> {
     pub fn new(sink: S) -> Self {
+        let sequence = PolyphonicSequence::default();
         Self {
             sink,
             is_playing: false,
-            sequence: PolyphonicSequence::default(),
+            total_scaled: u128::from(sequence.total_ticks()) * TICK_SCALE,
+            sequence,
             next_event_index: 0,
-            current_tick: 0.0,
-            bpm: 120.0,
+            position: 0,
+            bpm_milli: 120_000,
             midi_channel: 0,
             sounding: [0; 128],
             last_now_us: None,
@@ -98,13 +114,14 @@ impl<S: MidiSink> Transport<S> {
         }
     }
 
+    /// Tempo in thousandths of a beat per minute (120 BPM = `120_000`).
     #[must_use]
-    pub fn bpm(&self) -> f64 {
-        self.bpm
+    pub fn bpm_milli(&self) -> u32 {
+        self.bpm_milli
     }
 
-    pub fn set_bpm(&mut self, bpm: f64) {
-        self.bpm = bpm.max(0.0);
+    pub fn set_bpm_milli(&mut self, bpm_milli: u32) {
+        self.bpm_milli = bpm_milli;
     }
 
     #[must_use]
@@ -129,18 +146,20 @@ impl<S: MidiSink> Transport<S> {
         self.sink = sink;
     }
 
+    /// The play head's position in whole ticks.
+    #[must_use]
+    pub fn current_tick(&self) -> u64 {
+        // In-range by construction while a sequence is loaded (the position is
+        // reduced modulo the loop length); saturate rather than truncate for
+        // the empty-sequence case, where the position grows without bound.
+        u64::try_from(self.position / TICK_SCALE).unwrap_or(u64::MAX)
+    }
+
     /// Which sixteenth-note step the play head is on.
     #[must_use]
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "`wrap_around` keeps the head inside the sequence, and a \
-                  float-to-int cast saturates rather than wrapping, so a \
-                  out-of-range head would clamp to a valid step rather than \
-                  produce a bogus index"
-    )]
     pub fn current_step(&self) -> usize {
-        (self.current_tick / f64::from(TICKS_PER_STEP)) as usize
+        usize::try_from(self.current_tick() / u64::from(TICKS_PER_STEP))
+            .unwrap_or(usize::MAX)
     }
 
     /// Pitches currently held, as `(channel, pitch)` pairs. Test/telemetry aid.
@@ -165,12 +184,15 @@ impl<S: MidiSink> Transport<S> {
         let new_total = sequence.total_ticks();
 
         if old_total > 0 && new_total > 0 {
-            let length_ratio = f64::from(new_total) / f64::from(old_total);
-            self.current_tick *= length_ratio;
+            // Exact rescale: position < old_total × TICK_SCALE ≤ 2¹⁰², and the
+            // multiply by a u32 stays comfortably inside u128.
+            self.position =
+                self.position * u128::from(new_total) / u128::from(old_total);
         } else {
-            self.current_tick = 0.0;
+            self.position = 0;
         }
 
+        self.total_scaled = u128::from(new_total) * TICK_SCALE;
         self.sequence = sequence;
         self.reseek();
     }
@@ -187,17 +209,9 @@ impl<S: MidiSink> Transport<S> {
         }
 
         let delta_us = now_us.saturating_sub(previous);
-        let ticks_per_us = (self.bpm / SECONDS_PER_MINUTE)
-            * f64::from(TICKS_PER_QUARTER_NOTE)
-            / MICROS_PER_SECOND;
-        // Exact: f64 represents every integer below 2^53, and this is the gap
-        // between two clock readings — microseconds, not an absolute timestamp.
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "a delta large enough to lose precision is ~285 years"
-        )]
-        let delta_us = delta_us as f64;
-        self.current_tick += delta_us * ticks_per_us;
+        self.position += u128::from(delta_us)
+            * u128::from(self.bpm_milli)
+            * u128::from(TICKS_PER_QUARTER_NOTE);
 
         self.wrap_around();
         self.dispatch_due_events();
@@ -205,24 +219,23 @@ impl<S: MidiSink> Transport<S> {
 
     /// Bring the play head back inside the sequence after it ran off the end.
     fn wrap_around(&mut self) {
-        let total_ticks = f64::from(self.sequence.total_ticks());
-        if total_ticks <= 0.0 || self.current_tick < total_ticks {
+        if self.total_scaled == 0 || self.position < self.total_scaled {
             return;
         }
 
-        // Discard whole loops rather than subtracting one length: a long stall
-        // would otherwise leave the head beyond the end and replay the whole
-        // sequence in a burst on each following call.
-        let laps = (self.current_tick / total_ticks).floor();
-        self.current_tick -= laps * total_ticks;
+        // Modulo discards whole loops at once, so a long stall cannot leave
+        // the head beyond the end and replay the entire sequence in a burst on
+        // each following call.
+        self.position %= self.total_scaled;
         self.next_event_index = 0;
     }
 
     fn dispatch_due_events(&mut self) {
+        let current_tick = self.current_tick();
         while let Some(&event) =
             self.sequence.events().get(self.next_event_index)
         {
-            if f64::from(event.tick) > self.current_tick {
+            if u64::from(event.tick) > current_tick {
                 break;
             }
             self.process_event(event);
@@ -232,10 +245,11 @@ impl<S: MidiSink> Transport<S> {
 
     /// Point the event cursor at the first event at or after the play head.
     fn reseek(&mut self) {
+        let current_tick = self.current_tick();
         self.next_event_index = self
             .sequence
             .events()
-            .partition_point(|event| f64::from(event.tick) < self.current_tick);
+            .partition_point(|event| u64::from(event.tick) < current_tick);
     }
 
     fn process_event(&mut self, timed_event: TimedEvent) {
@@ -243,12 +257,12 @@ impl<S: MidiSink> Transport<S> {
         let message = match timed_event.event {
             MidiEventType::NoteOn { pitch, velocity } => {
                 let pitch = pitch.min(MAX_MIDI_PITCH);
-                self.sounding[pitch as usize] |= 1 << channel;
+                self.sounding[usize::from(pitch)] |= 1 << channel;
                 [NOTE_ON | channel, pitch, velocity.min(MAX_MIDI_VELOCITY)]
             }
             MidiEventType::NoteOff { pitch } => {
                 let pitch = pitch.min(MAX_MIDI_PITCH);
-                self.sounding[pitch as usize] &= !(1 << channel);
+                self.sounding[usize::from(pitch)] &= !(1 << channel);
                 [NOTE_OFF | channel, pitch, 0]
             }
         };
@@ -289,10 +303,11 @@ impl<S: MidiSink> Transport<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::playback::sink::{RecordingSink, SendError};
+    use crate::event::EventVec;
+    use crate::sink::{RecordingSink, SendError};
     use std::collections::HashMap;
 
-    const BPM: f64 = 120.0;
+    const BPM_MILLI: u32 = 120_000;
 
     /// At 120 BPM a quarter note is 500 ms, so a sixteenth-note step is 125 ms.
     const STEP_US: u64 = 125_000;
@@ -320,11 +335,13 @@ mod tests {
 
     /// One note per step, each released just before the next begins.
     pub(super) fn sequence(pitches: &[u8]) -> PolyphonicSequence {
-        let mut events = Vec::new();
+        let mut events = EventVec::new();
         for (step, &pitch) in pitches.iter().enumerate() {
             let tick = u32::try_from(step).unwrap() * TICKS_PER_STEP;
-            events.push(note_on(tick, pitch));
-            events.push(note_off(tick + TICKS_PER_STEP - 1, pitch));
+            events.push(note_on(tick, pitch)).unwrap();
+            events
+                .push(note_off(tick + TICKS_PER_STEP - 1, pitch))
+                .unwrap();
         }
         PolyphonicSequence::new(
             events,
@@ -336,10 +353,11 @@ mod tests {
     /// mid-note when something interrupts it.
     fn sustained(pitch: u8, steps: u32) -> PolyphonicSequence {
         PolyphonicSequence::new(
-            vec![
+            EventVec::from_slice(&[
                 note_on(0, pitch),
                 note_off(steps * TICKS_PER_STEP - 1, pitch),
-            ],
+            ])
+            .unwrap(),
             steps * TICKS_PER_STEP,
         )
     }
@@ -353,7 +371,7 @@ mod tests {
     ) -> (Transport<RecordingSink>, RecordingSink) {
         let recorder = RecordingSink::new();
         let mut transport = Transport::new(recorder.clone());
-        transport.set_bpm(BPM);
+        transport.set_bpm_milli(BPM_MILLI);
         transport.load_sequence(sequence);
         transport.advance_to(0);
         transport.set_playing(true);
@@ -389,7 +407,7 @@ mod tests {
 
     /// Net outstanding Note-Ons per pitch. Empty means everything that started
     /// was also stopped.
-    pub(super) fn outstanding(recorder: &RecordingSink) -> HashMap<u8, i32> {
+    fn outstanding(recorder: &RecordingSink) -> HashMap<u8, i32> {
         let mut held: HashMap<u8, i32> = HashMap::new();
         for message in recorder.messages() {
             match message[0] & 0xF0 {
@@ -406,7 +424,7 @@ mod tests {
     fn test_paused_transport_emits_nothing() {
         let recorder = RecordingSink::new();
         let mut transport = Transport::new(recorder.clone());
-        transport.set_bpm(BPM);
+        transport.set_bpm_milli(BPM_MILLI);
         transport.load_sequence(sequence(&[60, 62, 64, 65]));
         recorder.clear();
 
@@ -462,7 +480,7 @@ mod tests {
     }
 
     /// A stalled thread must not replay everything it missed in a burst — the
-    /// head is brought back by whole loops, not one length at a time.
+    /// head is brought back inside the loop by modulo, not one lap at a time.
     #[test]
     fn test_long_stall_does_not_burst() {
         let (mut transport, recorder) = playing(sequence(&[60, 62]));
@@ -492,7 +510,7 @@ mod tests {
         run_to_step(&mut slow, 3);
 
         let (mut fast, fast_recorder) = playing(sequence(&[60, 62, 64, 65]));
-        fast.set_bpm(BPM * 2.0);
+        fast.set_bpm_milli(2 * BPM_MILLI);
         run_to_step(&mut fast, 3);
 
         assert_eq!(note_ons(&slow_recorder).len(), 4);
@@ -503,10 +521,34 @@ mod tests {
         );
     }
 
+    /// Fractional tempos must not drift: 100.5 BPM over ten minutes of
+    /// one-millisecond updates lands exactly where arithmetic says it should.
+    /// This is the property the old floating-point accumulator could not
+    /// guarantee.
+    #[test]
+    fn test_fractional_tempo_does_not_drift() {
+        let (mut transport, _recorder) = playing(sequence(&[60, 62, 64, 65]));
+        transport.set_bpm_milli(100_500);
+
+        let total_us: u64 = 600_000_000; // ten minutes
+        for slice in 1..=total_us / SLICE_US {
+            transport.advance_to(slice * SLICE_US);
+        }
+
+        // 100.5 BPM × 480 PPQN × 600 s / 60 = 482_400 whole ticks exactly,
+        // reduced modulo the 4-step (480-tick) loop.
+        let expected_ticks = (u128::from(total_us)
+            * u128::from(transport.bpm_milli())
+            * u128::from(TICKS_PER_QUARTER_NOTE)
+            / TICK_SCALE)
+            % u128::from(4 * TICKS_PER_STEP);
+        assert_eq!(u128::from(transport.current_tick()), expected_ticks);
+    }
+
     #[test]
     fn test_zero_tempo_does_not_advance() {
         let (mut transport, recorder) = playing(sequence(&[60, 62]));
-        transport.set_bpm(0.0);
+        transport.set_bpm_milli(0);
 
         run_to_step(&mut transport, 10);
 
@@ -543,7 +585,7 @@ mod tests {
     #[test]
     fn test_empty_sequence_is_silent() {
         let (mut transport, recorder) =
-            playing(PolyphonicSequence::new(Vec::new(), 0));
+            playing(PolyphonicSequence::new(EventVec::new(), 0));
 
         run_to_step(&mut transport, 16);
 
@@ -647,8 +689,7 @@ mod tests {
         recorder.clear();
 
         // Three times as long, so the head is rescaled from step 1.5 to step
-        // 4.5 — deliberately between two events, since a head landing exactly
-        // on an event tick makes the result depend on float rounding.
+        // 4.5.
         transport.load_sequence(sequence(&[70, 71, 72, 73, 74, 75]));
         run_to_step(&mut transport, 2);
 
@@ -678,15 +719,16 @@ mod tests {
     fn test_out_of_range_pitch_and_velocity_are_masked() {
         let recorder = RecordingSink::new();
         let mut transport = Transport::new(recorder.clone());
-        transport.set_bpm(BPM);
+        transport.set_bpm_milli(BPM_MILLI);
         transport.load_sequence(PolyphonicSequence::new(
-            vec![TimedEvent {
+            EventVec::from_slice(&[TimedEvent {
                 tick: 0,
                 event: MidiEventType::NoteOn {
                     pitch: 200,
                     velocity: 240,
                 },
-            }],
+            }])
+            .unwrap(),
             TICKS_PER_STEP,
         ));
         transport.advance_to(0);
@@ -713,7 +755,7 @@ mod tests {
         let mut transport = Transport::new(RecordingSink::failing(
             SendError::Other("unplugged"),
         ));
-        transport.set_bpm(BPM);
+        transport.set_bpm_milli(BPM_MILLI);
         transport.load_sequence(sequence(&[60, 62]));
         transport.advance_to(0);
         transport.set_playing(true);
@@ -741,7 +783,8 @@ mod tests {
 mod property_tests {
     use super::tests::sequence;
     use super::*;
-    use crate::playback::sink::RecordingSink;
+    use crate::event::EventVec;
+    use crate::sink::RecordingSink;
     use proptest::prelude::*;
     use std::collections::BTreeSet;
 
@@ -795,13 +838,16 @@ mod property_tests {
         fn prop_stopping_never_leaves_a_note_hanging(
             events in any_events(),
             total_ticks in 0u32..2_000,
-            bpm in 0.0f64..400.0,
+            bpm_milli in 0u32..400_000,
             readings in proptest::collection::vec(0u64..5_000_000, 0..60),
         ) {
             let recorder = RecordingSink::new();
             let mut transport = Transport::new(recorder.clone());
-            transport.set_bpm(bpm);
-            transport.load_sequence(PolyphonicSequence::new(events, total_ticks));
+            transport.set_bpm_milli(bpm_milli);
+            transport.load_sequence(PolyphonicSequence::new(
+                EventVec::from_slice(&events).unwrap(),
+                total_ticks,
+            ));
             transport.set_playing(true);
 
             for reading in readings {
@@ -824,14 +870,14 @@ mod property_tests {
         #[test]
         fn prop_play_head_stays_inside_the_sequence(
             steps in 1usize..17,
-            bpm in 1.0f64..400.0,
+            bpm_milli in 1_000u32..400_000,
             readings in proptest::collection::vec(0u64..5_000_000, 1..40),
         ) {
             let pitches: Vec<u8> =
                 (0..steps).map(|i| 60 + u8::try_from(i).unwrap()).collect();
             let recorder = RecordingSink::new();
             let mut transport = Transport::new(recorder);
-            transport.set_bpm(bpm);
+            transport.set_bpm_milli(bpm_milli);
             transport.load_sequence(sequence(&pitches));
             transport.set_playing(true);
 

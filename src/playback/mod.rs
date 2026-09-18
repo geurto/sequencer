@@ -1,24 +1,23 @@
-pub mod clock;
 pub mod engine;
 pub mod midi;
-pub mod sink;
 pub mod state;
-pub mod transport;
 
 use device_query::Keycode;
 use log::{error, info, warn};
+use seq_core::PolyphonicSequence;
 use std::{
     sync::{Arc, Mutex as SyncMutex, mpsc::Sender as SyncSender},
     time::Duration,
 };
 use tokio::sync::{RwLock, mpsc};
 
+use crate::playback::midi::MidirSink;
 use crate::{
     MidiCommand,
     gui::state::{Event, GuiMessage},
     midi_utils,
 };
-use state::{PlaybackCommand, PlaybackStatus, PolyphonicSequence, SharedState};
+use state::{PlaybackCommand, PlaybackStatus, SharedState};
 
 /// Idle back-off for the handler loop.
 ///
@@ -32,7 +31,7 @@ pub struct PlaybackHandler {
     state: Arc<RwLock<SharedState>>,
 
     rx_midi: mpsc::Receiver<MidiCommand>,
-    rx_sequence: mpsc::Receiver<PolyphonicSequence>,
+    rx_sequence: mpsc::Receiver<Box<PolyphonicSequence>>,
     tx_engine: SyncSender<PlaybackCommand>,
     rx_engine_status: mpsc::UnboundedReceiver<PlaybackStatus>,
     tx_gui: Arc<
@@ -44,7 +43,7 @@ impl PlaybackHandler {
     pub fn new(
         state: Arc<RwLock<SharedState>>,
         rx_midi: mpsc::Receiver<MidiCommand>,
-        rx_sequence: mpsc::Receiver<PolyphonicSequence>,
+        rx_sequence: mpsc::Receiver<Box<PolyphonicSequence>>,
         tx_engine: SyncSender<PlaybackCommand>,
         rx_engine_status: mpsc::UnboundedReceiver<PlaybackStatus>,
         tx_gui: Arc<
@@ -118,7 +117,7 @@ impl PlaybackHandler {
                 match midi_utils::create_connection(&out_port) {
                     Ok(conn_out) => {
                         self.send_engine(PlaybackCommand::SetOutputConnection(
-                            Box::new(conn_out),
+                            Box::new(MidirSink(conn_out)),
                         ));
 
                         if let Some(mut tx) =

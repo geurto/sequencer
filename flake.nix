@@ -22,7 +22,12 @@
           inherit system overlays;
         };
 
-        rustToolchain = pkgs.rust-bin.stable.latest.default;
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+          # Bare-metal target used to prove crates/seq-core stays no_std
+          # (`cargo check -p seq-core --target riscv32imc-unknown-none-elf
+          # --no-default-features`); it is also the ESP32-C2/C3 target.
+          targets = [ "riscv32imc-unknown-none-elf" ];
+        };
         nativeDeps = with pkgs; [
           alsa-lib
           alsa-plugins

@@ -1,0 +1,27 @@
+[package]
+name = "seq-core"
+description = "Platform-independent sequencing core: patterns, generators, mixing and the playback transport. no_std, allocation-free."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+heapless = "0.9"
+# f32::sqrt is std-only; libm provides it for no_std targets.
+libm = "0.2"
+log = "0.4.22"
+rand = { version = "0.9.1", default-features = false }
+
+[features]
+default = []
+# SystemClock and the boxed-sink impl, for hosts with an operating system.
+std = []
+# RecordingSink and ManualClock, for consumers testing against this crate.
+test-util = ["std"]
+
+[dev-dependencies]
+proptest = "1.11.0"
+rand = { version = "0.9.1", features = ["small_rng"] }
+
+[lints]
+workspace = true
