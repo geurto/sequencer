@@ -51,6 +51,20 @@ impl<T: MidiSink + ?Sized> MidiSink for Box<T> {
     }
 }
 
+/// A sink that discards everything written to it.
+///
+/// Lets a sequencer run with no output attached — before a MIDI port is
+/// chosen, on a board whose UART is not configured yet — without any of the
+/// callers having to special-case a missing device.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SilentSink;
+
+impl MidiSink for SilentSink {
+    fn send(&mut self, _message: &[u8]) -> Result<(), SendError> {
+        Ok(())
+    }
+}
+
 /// A sink that records what was written to it instead of emitting it.
 ///
 /// Cloning shares the recording, so a test can keep a handle after handing the

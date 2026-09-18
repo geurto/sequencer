@@ -7,27 +7,26 @@ pub mod theme;
 use crate::MidiCommand;
 use iced::{
     Alignment::{Center, Start},
-    Element, Length, Subscription, Task, Theme,
-    futures::channel::mpsc,
+    Element, Length, Subscription, Task, Theme, keyboard,
     widget::Container,
     widget::{column, container, row, text},
 };
 use log::{error, info, warn};
+use seq_ui::{ControlEvent, UiSnapshot};
 use sequencers::euclidean::{
     Gui as EuclideanGui, Message as EuclideanGuiMessage,
 };
-use state::{Event, GuiMessage, poll};
-use std::sync::{Arc, Mutex};
+use state::{GuiMessage, control_for_key, snapshot_stream};
 use theme::CustomTheme;
-use tokio::sync::{mpsc::Sender, oneshot};
+use tokio::sync::{mpsc::Sender, oneshot, watch};
 
 #[derive(Debug)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "`tx_gui` is the channel *to* the GUI; the prefix is the direction, not the type"
-)]
 pub struct Gui {
-    tx_gui: Arc<Mutex<Option<mpsc::Sender<GuiMessage>>>>,
+    /// The newest frame published by the sequencer task. `watch`, so a slow
+    /// window cannot back-pressure playback — it just renders the latest.
+    rx_snapshot: watch::Receiver<UiSnapshot>,
+    /// User intentions, headed for the sequencer task.
+    tx_control: Sender<ControlEvent>,
     tx_midi: Sender<MidiCommand>,
     sequencer_left: EuclideanGui,
     sequencer_right: EuclideanGui,
@@ -39,13 +38,15 @@ pub struct Gui {
 
 impl Gui {
     fn new(
-        tx_gui: Arc<Mutex<Option<mpsc::Sender<GuiMessage>>>>,
+        rx_snapshot: watch::Receiver<UiSnapshot>,
+        tx_control: Sender<ControlEvent>,
         tx_midi: Sender<MidiCommand>,
         sequencer_left: EuclideanGui,
         sequencer_right: EuclideanGui,
     ) -> Self {
         Self {
-            tx_gui,
+            rx_snapshot,
+            tx_control,
             tx_midi,
             sequencer_left,
             sequencer_right,
@@ -56,30 +57,39 @@ impl Gui {
         }
     }
     pub fn subscription(&self) -> Subscription<GuiMessage> {
-        Subscription::run(poll).map(GuiMessage::ReceivedEvent)
+        Subscription::batch([
+            // Frames from the sequencer task. `run_with_id` keys the
+            // subscription by name, so the stream is started once however
+            // often this is rebuilt.
+            Subscription::run_with_id(
+                "ui-snapshots",
+                snapshot_stream(self.rx_snapshot.clone()),
+            )
+            .map(GuiMessage::SnapshotChanged),
+            // Window-local key presses. Nothing reads the keyboard globally
+            // any more, so the app only responds when it is focused.
+            keyboard::on_key_press(|key, _modifiers| {
+                control_for_key(&key).map(GuiMessage::Control)
+            }),
+        ])
     }
 
     pub fn update(&mut self, message: GuiMessage) -> Task<GuiMessage> {
         match message {
-            GuiMessage::ReceivedEvent(event) => match event {
-                Event::Connected(sender) => {
-                    info!("Sender connected!");
-                    if let Ok(mut guard) = self.tx_gui.lock() {
-                        *guard = Some(sender.clone());
-                    }
+            GuiMessage::SnapshotChanged(snapshot) => {
+                self.sequencer_left
+                    .update(EuclideanGuiMessage::UpdateState(snapshot));
+                self.sequencer_right
+                    .update(EuclideanGuiMessage::UpdateState(snapshot));
+                self.mixer_ratio = f32::from(snapshot.mix) / 255.0;
+            }
+            GuiMessage::Control(event) => {
+                // try_send, not send: input must never block the UI thread,
+                // and the channel is sized well beyond human key rates.
+                if let Err(e) = self.tx_control.try_send(event) {
+                    warn!("Dropped control event {event:?}: {e}");
                 }
-                Event::Disconnected => info!("Sender Disconnected"),
-                Event::StateChanged(state) => {
-                    self.sequencer_left.update(
-                        EuclideanGuiMessage::UpdateState(state.clone()),
-                    );
-
-                    self.sequencer_right.update(
-                        EuclideanGuiMessage::UpdateState(state.clone()),
-                    );
-                    self.mixer_ratio = state.mixer.ratio;
-                }
-            },
+            }
             GuiMessage::LeftSequencer(state) => {
                 self.sequencer_left.update(state);
             }
@@ -242,7 +252,8 @@ impl Gui {
     }
 
     pub fn run(
-        tx_gui: Arc<Mutex<Option<mpsc::Sender<GuiMessage>>>>,
+        rx_snapshot: watch::Receiver<UiSnapshot>,
+        tx_control: Sender<ControlEvent>,
         tx_midi: Sender<MidiCommand>,
         sequencer_left: EuclideanGui,
         sequencer_right: EuclideanGui,
@@ -254,7 +265,13 @@ impl Gui {
             .centered()
             .run_with(|| {
                 (
-                    Self::new(tx_gui, tx_midi, sequencer_left, sequencer_right),
+                    Self::new(
+                        rx_snapshot,
+                        tx_control,
+                        tx_midi,
+                        sequencer_left,
+                        sequencer_right,
+                    ),
                     Task::none(),
                 )
             })

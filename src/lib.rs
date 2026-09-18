@@ -1,23 +1,21 @@
-//! The desktop sequencer application: GUI, keyboard input, MIDI ports and the
-//! async plumbing between them.
+//! The desktop sequencer application: window, keyboard, MIDI ports and the
+//! task plumbing between them.
 //!
 //! Everything musical — pattern types, the Euclidean generator, the mixer and
 //! the playback transport — lives in the platform-independent [`seq_core`]
-//! crate; this one only drives it.
+//! crate, and the interface seam ([`seq_ui::UiSnapshot`],
+//! [`seq_ui::ControlEvent`]) lives in `seq-ui`. This crate only drives them.
 
 pub mod gui;
-pub mod mixer;
 pub mod playback;
-pub mod sequencers;
+pub mod sequencer;
+pub mod state;
 
 pub use gui::Gui;
-pub use mixer::{Mixer, state::MixerState};
 pub use playback::{
-    PlaybackHandler,
     engine::PlaybackEngine,
     midi::{MidiCommand, MidirSink, midi_utils},
-    state::{PlaybackCommand, PlaybackStatus, SharedState},
+    state::PlaybackCommand,
 };
-pub use sequencers::euclidean::{
-    EuclideanSequencer, state::EuclideanSequencerState,
-};
+pub use sequencer::Sequencer;
+pub use state::{SequencerState, SlotState};

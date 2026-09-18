@@ -41,7 +41,10 @@ sudo make install
 `ttymidi -s /dev/ttyAMA0 -b 38400 -v` Will run ttymidi in verbose mode (midi traffic displayed on screen).
 
 ## Use
-To operate the sequencer, you can attach a keyboard to whatever device is running this code, e.g. a Raspberry Pi. 
+To operate the sequencer, you can attach a keyboard to whatever device is running this code, e.g. a Raspberry Pi.
+
+Keys are read from the sequencer's own window, so it only responds while focused
+and no longer needs to watch the keyboard system-wide.
 
 ### Common keyboard shortcuts
 The common keyboard shortcuts are:

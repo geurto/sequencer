@@ -1,0 +1,12 @@
+[package]
+name = "seq-ui"
+description = "The user-interface seam: the snapshot the renderer draws and the control events every input surface produces. no_std, allocation-free."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+seq-core = { path = "../seq-core" }
+
+[lints]
+workspace = true

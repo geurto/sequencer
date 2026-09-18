@@ -8,34 +8,31 @@ use iced::{
         column, container,
     },
 };
+use seq_ui::{Slot, SlotSnapshot, UiSnapshot};
 
-use crate::{
-    EuclideanSequencerState, SharedState, gui::CustomTheme,
-    playback::state::SequencerSlot,
-};
+use crate::gui::CustomTheme;
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Copy, Debug)]
 pub enum Message {
-    UpdateState(SharedState),
+    UpdateState(UiSnapshot),
 }
 
 #[derive(Debug)]
 pub struct Gui {
-    state: EuclideanSequencerState,
-    active_sequencer: bool,
-    current_note_index: usize,
-    slot: SequencerSlot,
+    snapshot: SlotSnapshot,
+    is_active: bool,
+    step_index: usize,
+    slot: Slot,
     theme: CustomTheme,
 }
 
 impl Gui {
     #[must_use]
-    pub fn new(slot: SequencerSlot) -> Self {
-        let active_sequencer: bool = slot == SequencerSlot::Left;
+    pub fn new(slot: Slot) -> Self {
         Self {
-            state: EuclideanSequencerState::default(),
-            active_sequencer,
-            current_note_index: 0,
+            snapshot: SlotSnapshot::default(),
+            is_active: slot == Slot::Left,
+            step_index: 0,
             slot,
             theme: CustomTheme::default(),
         }
@@ -47,13 +44,10 @@ impl Gui {
 
     pub fn update(&mut self, message: Message) {
         match message {
-            Message::UpdateState(new_state) => {
-                self.state = match self.slot {
-                    SequencerSlot::Left => new_state.left_sequencer,
-                    SequencerSlot::Right => new_state.right_sequencer,
-                };
-                self.active_sequencer = new_state.active_sequencer == self.slot;
-                self.current_note_index = new_state.current_note_index;
+            Message::UpdateState(state) => {
+                self.snapshot = state.slots[self.slot.index()];
+                self.is_active = state.active == self.slot;
+                self.step_index = usize::from(state.step_index);
             }
         }
     }
@@ -95,15 +89,7 @@ impl canvas::Program<Message> for Gui {
         let start_x = center.x - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
         let start_y = center.y - 1.5 * CIRCLE_SPACING - 2. * CIRCLE_RADIUS;
 
-        // The same generator that feeds the mixer, so the display can never
-        // disagree with what plays. Velocity is irrelevant for drawing.
-        let pattern = seq_core::euclid::pattern(
-            self.state.steps,
-            self.state.pulses,
-            self.state.phase,
-            self.state.pitch,
-            100,
-        );
+        let steps = usize::from(self.snapshot.steps).max(1);
 
         for row in 0..4u16 {
             for col in 0..4u16 {
@@ -116,7 +102,7 @@ impl canvas::Program<Message> for Gui {
                 let circle = Path::circle(circle_center, CIRCLE_RADIUS);
 
                 // circle outline
-                let bg_circle = if self.active_sequencer {
+                let bg_circle = if self.is_active {
                     Path::circle(circle_center, ACTIVE_CIRCLE_BORDER_RADIUS)
                 } else {
                     Path::circle(circle_center, CIRCLE_BORDER_RADIUS)
@@ -124,14 +110,14 @@ impl canvas::Program<Message> for Gui {
                 frame.fill(&bg_circle, self.theme.primary_color_muted);
 
                 // pulses and current playing note
-                let color = if pattern.hit(index) {
+                let color = if self.snapshot.hit(index) {
                     self.theme.accent_color
-                } else if index >= self.state.steps {
+                } else if index >= steps {
                     self.theme.accent_color_muted
                 } else {
                     self.theme.surface_color
                 };
-                if index == self.current_note_index % self.state.steps {
+                if index == self.step_index % steps {
                     frame.fill(&circle, self.theme.primary_color);
                 } else {
                     frame.fill(&circle, color);
@@ -161,7 +147,7 @@ impl canvas::Program<Message> for Gui {
         );
 
         // show note info - text
-        let note_info = seq_core::note_name(self.state.pitch).to_string();
+        let note_info = seq_core::note_name(self.snapshot.pitch).to_string();
         let text = Text {
             content: note_info,
             position: box_center,

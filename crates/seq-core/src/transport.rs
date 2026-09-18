@@ -162,6 +162,48 @@ impl<S: MidiSink> Transport<S> {
             .unwrap_or(usize::MAX)
     }
 
+    /// Microseconds until the transport next needs attention, or `None` when
+    /// nothing is scheduled (stopped, stopped tempo, or a sequence with no
+    /// total length).
+    ///
+    /// "Attention" is whichever comes first of a MIDI event falling due and
+    /// the play head crossing into a new step — the latter matters because the
+    /// display tracks [`current_step`](Self::current_step) even while a
+    /// sequence is silent.
+    ///
+    /// This is what lets a driver *wait* rather than poll: a desktop thread
+    /// blocks on its command channel with this as the timeout, and an embedded
+    /// build arms a one-shot timer with it.
+    #[must_use]
+    pub fn time_to_next_wakeup_us(&self) -> Option<u64> {
+        if !self.is_playing || self.bpm_milli == 0 || self.total_scaled == 0 {
+            return None;
+        }
+
+        // The next event, or the loop point if none remain this time round.
+        let next_event = self
+            .sequence
+            .events()
+            .get(self.next_event_index)
+            .map_or(self.total_scaled, |event| {
+                u128::from(event.tick) * TICK_SCALE
+            });
+
+        // The next step boundary, for the play-head display.
+        let step_scaled = u128::from(TICKS_PER_STEP) * TICK_SCALE;
+        let next_step =
+            self.position - (self.position % step_scaled) + step_scaled;
+
+        let remaining = next_event.min(next_step).saturating_sub(self.position);
+
+        // Scaled units are microseconds × milli-BPM × PPQN, so dividing by the
+        // latter two recovers microseconds. Round up: waking a microsecond
+        // early costs one extra loop, waking late makes a note late.
+        let per_us =
+            u128::from(self.bpm_milli) * u128::from(TICKS_PER_QUARTER_NOTE);
+        Some(u64::try_from(remaining.div_ceil(per_us)).unwrap_or(u64::MAX))
+    }
+
     /// Pitches currently held, as `(channel, pitch)` pairs. Test/telemetry aid.
     pub fn sounding_notes(&self) -> impl Iterator<Item = (u8, u8)> + '_ {
         // Pitches are counted as u8 rather than indexed by usize, so no cast is
@@ -765,6 +807,83 @@ mod tests {
         }
 
         assert!(transport.is_playing());
+    }
+
+    #[test]
+    fn test_no_wakeup_scheduled_when_nothing_will_happen() {
+        let recorder = RecordingSink::new();
+        let mut transport = Transport::new(recorder);
+        transport.set_bpm_milli(BPM_MILLI);
+        transport.load_sequence(sequence(&[60, 62]));
+
+        assert_eq!(
+            transport.time_to_next_wakeup_us(),
+            None,
+            "a stopped transport has nothing to wake for"
+        );
+
+        transport.advance_to(0);
+        transport.set_playing(true);
+        transport.set_bpm_milli(0);
+        assert_eq!(
+            transport.time_to_next_wakeup_us(),
+            None,
+            "a stationary play head has nothing to wake for"
+        );
+    }
+
+    /// The whole point of the wakeup: waiting exactly that long must not miss
+    /// an event. Checked across the sequence rather than at one point.
+    #[test]
+    fn test_waiting_the_reported_time_never_misses_an_event() {
+        let (mut transport, recorder) = playing(sequence(&[60, 62, 64, 65]));
+
+        // Four loops of four steps, driven only by the reported wait.
+        let target = 4 * 4 * STEP_US;
+        let mut now = 0u64;
+        for _ in 0..1_000 {
+            let wait = transport
+                .time_to_next_wakeup_us()
+                .expect("a playing transport always has a next wakeup");
+            if now + wait >= target {
+                break;
+            }
+            now += wait;
+            transport.advance_to(now);
+        }
+
+        assert_eq!(
+            note_ons(&recorder),
+            [60, 62, 64, 65].repeat(4),
+            "sleeping the reported time dropped or duplicated notes"
+        );
+    }
+
+    #[test]
+    fn test_wakeup_tracks_the_step_grid_when_the_sequence_is_silent() {
+        let (mut transport, _recorder) = playing(PolyphonicSequence::new(
+            EventVec::new(),
+            4 * TICKS_PER_STEP,
+        ));
+
+        // Nothing to dispatch, but the display still follows the play head, so
+        // the next wakeup is the step boundary: 125 ms at 120 BPM.
+        assert_eq!(transport.time_to_next_wakeup_us(), Some(STEP_US));
+
+        transport.advance_to(STEP_US / 2);
+        assert_eq!(transport.time_to_next_wakeup_us(), Some(STEP_US / 2));
+    }
+
+    #[test]
+    fn test_wakeup_shortens_as_tempo_rises() {
+        let (transport, _recorder) = playing(sequence(&[60, 62, 64, 65]));
+        let at_120 = transport.time_to_next_wakeup_us().unwrap();
+
+        let (mut fast, _recorder) = playing(sequence(&[60, 62, 64, 65]));
+        fast.set_bpm_milli(2 * BPM_MILLI);
+        let at_240 = fast.time_to_next_wakeup_us().unwrap();
+
+        assert_eq!(at_240, at_120 / 2);
     }
 
     #[test]

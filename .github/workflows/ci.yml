@@ -42,12 +42,12 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-  # seq-core must keep building for a bare-metal target with no default
-  # features — this is what guarantees the crate stays no_std and
-  # allocation-free as it grows. riscv32imc is a tier-2 target and also the
+  # seq-core and seq-ui must keep building for a bare-metal target with no
+  # default features — this is what guarantees they stay no_std and
+  # allocation-free as they grow. riscv32imc is a tier-2 target and also the
   # ESP32-C2/C3 architecture.
   no-std:
-    name: seq-core builds bare-metal
+    name: core crates build bare-metal
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,7 +60,7 @@ jobs:
 
       - name: Check no_std
         run: >
-          cargo check -p seq-core
+          cargo check -p seq-core -p seq-ui
           --target riscv32imc-unknown-none-elf
           --no-default-features --locked
 

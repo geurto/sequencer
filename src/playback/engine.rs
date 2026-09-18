@@ -1,22 +1,31 @@
 //! The synchronous driver around [`Transport`].
 //!
-//! Everything here is the *platform* half: the command channel, the keyboard
-//! poll and the sleep. The musical half lives in [`seq_core::Transport`],
-//! which this type simply feeds with clock readings.
+//! Everything here is the *platform* half: the command channel and the
+//! waiting. The musical half lives in [`seq_core::Transport`], which this type
+//! feeds with clock readings.
+//!
+//! The loop does not poll. It asks the transport when it next needs attention
+//! and blocks on its command channel until then, so a paused sequencer costs
+//! nothing and a playing one wakes once per event rather than a thousand times
+//! a second.
 
-use device_query::{DeviceQuery, DeviceState, Keycode};
-use log::{error, info};
+use log::info;
 use seq_core::{Clock, MidiSink, SystemClock, Transport};
-use std::collections::HashSet;
 use std::fmt;
-use std::{sync::mpsc::Receiver, time::Duration};
-use tokio::sync::mpsc::UnboundedSender;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
+use std::time::Duration;
+use tokio::sync::watch;
 
-use crate::playback::state::{PlaybackCommand, PlaybackStatus};
+use crate::playback::state::PlaybackCommand;
+use crate::state::bpm_to_milli;
 
-/// How long the driver sleeps between updates. Sets the playback timing
-/// resolution, and with it the audible jitter floor.
-const TICK_INTERVAL: Duration = Duration::from_millis(1);
+/// How close to a deadline the coarse sleep stops and a spin takes over.
+///
+/// `recv_timeout` is only as punctual as the OS scheduler, and a late wakeup
+/// is a late note. Sleeping to within this margin and spinning the rest keeps
+/// jitter under the ~1 ms a MIDI message takes on the wire, while leaving the
+/// thread asleep for almost all of the interval.
+const SPIN_MARGIN_US: u64 = 1_500;
 
 /// The output a [`PlaybackEngine`] writes to.
 ///
@@ -24,16 +33,13 @@ const TICK_INTERVAL: Duration = Duration::from_millis(1);
 /// when the user picks a different MIDI port.
 pub type BoxedSink = Box<dyn MidiSink + Send>;
 
-/// The transport keeps tempo in integer milli-BPM; the UI deals in `f64`.
-fn bpm_to_milli(bpm: f64) -> u32 {
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "clamped to a u32-representable, non-negative range first"
-    )]
-    {
-        (bpm.clamp(0.0, 4_000_000.0) * 1000.0).round() as u32
-    }
+/// Why a wait ended.
+enum Wake {
+    Command(PlaybackCommand),
+    /// The transport's deadline arrived.
+    Elapsed,
+    /// Every command sender is gone.
+    Shutdown,
 }
 
 pub struct PlaybackEngine<C: Clock = SystemClock> {
@@ -41,11 +47,9 @@ pub struct PlaybackEngine<C: Clock = SystemClock> {
     clock: C,
 
     rx_command: Receiver<PlaybackCommand>,
-    tx_status: UnboundedSender<PlaybackStatus>,
-
-    /// Last step index reported to the GUI, so `NotePlayed` is sent on change
-    /// rather than on a timer of its own.
-    last_reported_step: Option<usize>,
+    /// The play head, for the display. `watch` because only the newest value
+    /// matters — a UI that misses a step should skip it, not queue it.
+    tx_step: watch::Sender<usize>,
 }
 
 /// Hand-written because the clock carries no `Debug` bound; forwards to
@@ -54,7 +58,6 @@ impl<C: Clock> fmt::Debug for PlaybackEngine<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PlaybackEngine")
             .field("transport", &self.transport)
-            .field("last_reported_step", &self.last_reported_step)
             .finish_non_exhaustive()
     }
 }
@@ -63,17 +66,17 @@ impl PlaybackEngine<SystemClock> {
     #[must_use]
     pub fn new(
         rx_command: Receiver<PlaybackCommand>,
-        tx_status: UnboundedSender<PlaybackStatus>,
+        tx_step: watch::Sender<usize>,
         sink: BoxedSink,
     ) -> Self {
-        Self::with_clock(rx_command, tx_status, sink, SystemClock::new())
+        Self::with_clock(rx_command, tx_step, sink, SystemClock::new())
     }
 }
 
 impl<C: Clock> PlaybackEngine<C> {
     pub fn with_clock(
         rx_command: Receiver<PlaybackCommand>,
-        tx_status: UnboundedSender<PlaybackStatus>,
+        tx_step: watch::Sender<usize>,
         sink: BoxedSink,
         clock: C,
     ) -> Self {
@@ -81,91 +84,104 @@ impl<C: Clock> PlaybackEngine<C> {
             transport: Transport::new(sink),
             clock,
             rx_command,
-            tx_status,
-            last_reported_step: None,
+            tx_step,
         }
     }
 
     pub fn run(mut self) {
         info!("Starting synchronous playback engine");
 
-        let device_state = DeviceState::new();
-        let mut last_keys = HashSet::new();
-
         loop {
-            self.handle_commands();
-
-            let keys: HashSet<Keycode> =
-                device_state.get_keys().into_iter().collect();
-            if keys != last_keys {
-                let pressed: Vec<_> =
-                    keys.difference(&last_keys).copied().collect();
-                self.handle_keys(&pressed);
-                last_keys = keys;
-            }
-
             self.update();
 
-            std::thread::sleep(TICK_INTERVAL);
+            match self.wait() {
+                Wake::Command(command) => {
+                    self.apply(command);
+                    // Anything that arrived alongside it, before recomputing
+                    // the deadline.
+                    while let Ok(command) = self.rx_command.try_recv() {
+                        self.apply(command);
+                    }
+                }
+                Wake::Elapsed => {}
+                Wake::Shutdown => break,
+            }
         }
+
+        // Nothing should still be sounding when the program ends.
+        self.transport.set_playing(false);
+        info!("Playback engine stopped");
     }
 
-    /// One iteration of the driver loop, minus the keyboard poll — which needs
-    /// a display server, and so cannot run under test.
+    /// Advance the play head and report where it landed.
     fn update(&mut self) {
         self.transport.advance_to(self.clock.now_us());
-        self.report_step();
-    }
 
-    fn handle_commands(&mut self) {
-        while let Ok(command) = self.rx_command.try_recv() {
-            match command {
-                PlaybackCommand::LoadSequence(sequence) => {
-                    info!(
-                        "Engine received new sequence of {} events",
-                        sequence.events().len()
-                    );
-                    self.transport.load_sequence(*sequence);
-                }
-                PlaybackCommand::SetMidiChannel(channel) => {
-                    self.transport.set_midi_channel(channel);
-                }
-                PlaybackCommand::SetBPM(bpm) => {
-                    self.transport.set_bpm_milli(bpm_to_milli(bpm));
-                }
-                PlaybackCommand::SetOutputConnection(sink) => {
-                    self.transport.set_sink(sink);
-                }
-            }
-        }
-    }
-
-    /// Playback keys are handled here rather than round-tripping through
-    /// `PlaybackHandler`, to keep the response immediate.
-    fn handle_keys(&mut self, pressed: &[Keycode]) {
-        for key in pressed {
-            if *key == Keycode::Space {
-                self.transport.set_playing(!self.transport.is_playing());
-            }
-        }
-
-        if let Err(e) = self
-            .tx_status
-            .send(PlaybackStatus::InputChanged(pressed.to_vec()))
-        {
-            error!("Error sending input changes to PlaybackHandler: {e}");
-        }
-    }
-
-    fn report_step(&mut self) {
         let step = self.transport.current_step();
-        if self.last_reported_step == Some(step) {
-            return;
+        if *self.tx_step.borrow() != step {
+            self.tx_step.send_replace(step);
         }
-        self.last_reported_step = Some(step);
+    }
 
-        if let Err(e) = self.tx_status.send(PlaybackStatus::NotePlayed(step)) {
-            error!("Error sending PlaybackStatus: {e}");
+    /// Block until the transport needs attention or a command arrives.
+    fn wait(&self) -> Wake {
+        let Some(until) = self.transport.time_to_next_wakeup_us() else {
+            // Nothing is scheduled — a stopped transport has no deadline, so
+            // sleep properly until something asks for work.
+            return match self.rx_command.recv() {
+                Ok(command) => Wake::Command(command),
+                Err(_) => Wake::Shutdown,
+            };
+        };
+
+        let deadline = self.clock.now_us().saturating_add(until);
+        loop {
+            let remaining = deadline.saturating_sub(self.clock.now_us());
+            if remaining == 0 {
+                return Wake::Elapsed;
+            }
+
+            if remaining > SPIN_MARGIN_US {
+                let timeout = Duration::from_micros(remaining - SPIN_MARGIN_US);
+                match self.rx_command.recv_timeout(timeout) {
+                    Ok(command) => return Wake::Command(command),
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => {
+                        return Wake::Shutdown;
+                    }
+                }
+            } else {
+                // Final approach: too close to trust the scheduler.
+                match self.rx_command.try_recv() {
+                    Ok(command) => return Wake::Command(command),
+                    Err(TryRecvError::Empty) => std::hint::spin_loop(),
+                    Err(TryRecvError::Disconnected) => return Wake::Shutdown,
+                }
+            }
+        }
+    }
+
+    fn apply(&mut self, command: PlaybackCommand) {
+        match command {
+            PlaybackCommand::LoadSequence(sequence) => {
+                info!(
+                    "Engine received new sequence of {} events",
+                    sequence.events().len()
+                );
+                self.transport.load_sequence(*sequence);
+            }
+            PlaybackCommand::SetPlaying(playing) => {
+                self.transport.set_playing(playing);
+            }
+            PlaybackCommand::SetMidiChannel(channel) => {
+                self.transport.set_midi_channel(channel);
+            }
+            PlaybackCommand::SetBPM(bpm) => {
+                self.transport.set_bpm_milli(bpm_to_milli(bpm));
+            }
+            PlaybackCommand::SetOutputConnection(sink) => {
+                self.transport.set_sink(sink);
+            }
         }
     }
 }
@@ -178,7 +194,6 @@ mod tests {
         RecordingSink, TICKS_PER_STEP, TimedEvent,
     };
     use std::sync::mpsc::{Sender as SyncSender, channel as sync_channel};
-    use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
     /// At 120 BPM a sixteenth-note step is 125 ms.
     const STEP_US: u64 = 125_000;
@@ -186,7 +201,7 @@ mod tests {
     struct Harness {
         engine: PlaybackEngine<ManualClock>,
         commands: SyncSender<PlaybackCommand>,
-        status: UnboundedReceiver<PlaybackStatus>,
+        steps: watch::Receiver<usize>,
         clock: ManualClock,
         sink: RecordingSink,
     }
@@ -194,13 +209,13 @@ mod tests {
     impl Harness {
         fn new() -> Self {
             let (commands, rx_command) = sync_channel();
-            let (tx_status, status) = unbounded_channel();
+            let (tx_step, steps) = watch::channel(0);
             let clock = ManualClock::new();
             let sink = RecordingSink::new();
 
             let engine = PlaybackEngine::with_clock(
                 rx_command,
-                tx_status,
+                tx_step,
                 Box::new(sink.clone()),
                 clock.clone(),
             );
@@ -208,46 +223,44 @@ mod tests {
             Self {
                 engine,
                 commands,
-                status,
+                steps,
                 clock,
                 sink,
             }
         }
 
-        fn send(&self, command: PlaybackCommand) {
+        fn send(&mut self, command: PlaybackCommand) {
             self.commands.send(command).unwrap();
-            // Commands are only read inside the loop.
+            self.drain_commands();
         }
 
-        /// Run the driver loop for `steps` sixteenth notes.
+        fn drain_commands(&mut self) {
+            while let Ok(command) = self.engine.rx_command.try_recv() {
+                self.engine.apply(command);
+            }
+        }
+
+        /// Run the driver loop for `steps` sixteenth notes, in the 1 ms slices
+        /// a coarse scheduler would produce.
         fn run_steps(&mut self, steps: u64) {
             for _ in 0..steps * STEP_US / 1_000 {
-                self.engine.handle_commands();
+                self.drain_commands();
                 self.clock.advance_us(1_000);
                 self.engine.update();
             }
         }
 
-        fn statuses(&mut self) -> Vec<PlaybackStatus> {
-            let mut out = Vec::new();
-            while let Ok(status) = self.status.try_recv() {
-                out.push(status);
-            }
-            out
-        }
-
-        fn steps_reported(&mut self) -> Vec<usize> {
-            self.statuses()
-                .into_iter()
-                .filter_map(|status| match status {
-                    PlaybackStatus::NotePlayed(step) => Some(step),
-                    PlaybackStatus::InputChanged(_) => None,
-                })
+        fn note_ons(&self) -> Vec<u8> {
+            self.sink
+                .messages()
+                .iter()
+                .filter(|m| m[0] & 0xF0 == 0x90)
+                .map(|m| m[1])
                 .collect()
         }
     }
 
-    fn sequence(pitches: &[u8]) -> PolyphonicSequence {
+    fn sequence(pitches: &[u8]) -> Box<PolyphonicSequence> {
         let mut events = EventVec::new();
         for (step, &pitch) in pitches.iter().enumerate() {
             let tick = u32::try_from(step).unwrap() * TICKS_PER_STEP;
@@ -267,10 +280,10 @@ mod tests {
                 })
                 .unwrap();
         }
-        PolyphonicSequence::new(
+        Box::new(PolyphonicSequence::new(
             events,
             u32::try_from(pitches.len()).unwrap() * TICKS_PER_STEP,
-        )
+        ))
     }
 
     #[test]
@@ -279,62 +292,65 @@ mod tests {
 
         harness.send(PlaybackCommand::SetBPM(90.0));
         harness.send(PlaybackCommand::SetMidiChannel(7));
-        harness.engine.handle_commands();
 
         assert_eq!(harness.engine.transport.bpm_milli(), 90_000);
         assert_eq!(harness.engine.transport.midi_channel(), 7);
     }
 
+    /// Playback is now started by command rather than by the engine reading
+    /// the keyboard itself.
     #[test]
-    fn test_fractional_bpm_survives_the_conversion() {
-        assert_eq!(bpm_to_milli(120.5), 120_500);
-        assert_eq!(bpm_to_milli(0.0), 0);
-        assert_eq!(bpm_to_milli(-10.0), 0, "negative tempo clamps to zero");
+    fn test_set_playing_starts_and_stops_playback() {
+        let mut harness = Harness::new();
+        harness.send(PlaybackCommand::LoadSequence(sequence(&[60, 62])));
+
+        assert!(!harness.engine.transport.is_playing());
+        harness.send(PlaybackCommand::SetPlaying(true));
+        assert!(harness.engine.transport.is_playing());
+
+        harness.run_steps(1);
+        assert_eq!(harness.note_ons(), vec![60]);
+
+        harness.send(PlaybackCommand::SetPlaying(false));
+        assert!(!harness.engine.transport.is_playing());
     }
 
     #[test]
     fn test_loaded_sequence_plays() {
         let mut harness = Harness::new();
-        harness
-            .send(PlaybackCommand::LoadSequence(Box::new(sequence(&[60, 62]))));
-        harness.engine.handle_commands();
-        harness.engine.transport.set_playing(true);
+        harness.send(PlaybackCommand::LoadSequence(sequence(&[60, 62])));
+        harness.send(PlaybackCommand::SetPlaying(true));
 
         harness.run_steps(2);
 
-        let pitches: Vec<u8> = harness
-            .sink
-            .messages()
-            .iter()
-            .filter(|m| m[0] & 0xF0 == 0x90)
-            .map(|m| m[1])
-            .collect();
-        assert_eq!(pitches, vec![60, 62]);
+        assert_eq!(harness.note_ons(), vec![60, 62]);
     }
 
-    /// The GUI's play head used to be driven by a tick counter kept alongside
-    /// the play position; it is now derived from it, so it cannot drift out of
-    /// step or report the same step twice.
+    /// The GUI's play head is derived from the play position, so it cannot
+    /// drift out of step or report the same step twice.
     #[test]
-    fn test_each_step_is_reported_exactly_once() {
-        let mut harness = Harness::new();
-        harness.send(PlaybackCommand::LoadSequence(Box::new(sequence(&[
-            60, 62, 64, 65,
-        ]))));
-        harness.engine.handle_commands();
-        harness.engine.transport.set_playing(true);
-
-        harness.run_steps(4);
-
-        assert_eq!(harness.steps_reported(), vec![0, 1, 2, 3]);
-    }
-
-    #[test]
-    fn test_paused_engine_reports_one_step_and_plays_nothing() {
+    fn test_each_step_is_published_once() {
         let mut harness = Harness::new();
         harness
-            .send(PlaybackCommand::LoadSequence(Box::new(sequence(&[60, 62]))));
-        harness.engine.handle_commands();
+            .send(PlaybackCommand::LoadSequence(sequence(&[60, 62, 64, 65])));
+        harness.send(PlaybackCommand::SetPlaying(true));
+
+        let mut seen = vec![*harness.steps.borrow_and_update()];
+        for _ in 0..4 * STEP_US / 1_000 {
+            harness.clock.advance_us(1_000);
+            harness.engine.update();
+            if harness.steps.has_changed().unwrap() {
+                seen.push(*harness.steps.borrow_and_update());
+            }
+        }
+
+        assert_eq!(seen, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn test_paused_engine_plays_nothing() {
+        let mut harness = Harness::new();
+        harness.send(PlaybackCommand::LoadSequence(sequence(&[60, 62])));
 
         harness.run_steps(4);
 
@@ -347,20 +363,13 @@ mod tests {
             .filter(|m| matches!(m[0] & 0xF0, 0x80 | 0x90))
             .collect();
         assert!(notes.is_empty(), "a paused engine played {notes:?}");
-        assert_eq!(
-            harness.steps_reported(),
-            vec![0],
-            "the initial position is reported once, then nothing moves"
-        );
     }
 
     #[test]
     fn test_switching_output_moves_playback_to_the_new_sink() {
         let mut harness = Harness::new();
-        harness
-            .send(PlaybackCommand::LoadSequence(Box::new(sequence(&[60, 62]))));
-        harness.engine.handle_commands();
-        harness.engine.transport.set_playing(true);
+        harness.send(PlaybackCommand::LoadSequence(sequence(&[60, 62])));
+        harness.send(PlaybackCommand::SetPlaying(true));
 
         let replacement = RecordingSink::new();
         harness.send(PlaybackCommand::SetOutputConnection(Box::new(
@@ -369,5 +378,30 @@ mod tests {
         harness.run_steps(2);
 
         assert!(!replacement.is_empty(), "new sink received nothing");
+    }
+
+    /// Closing the command channel ends the loop instead of leaving the thread
+    /// spinning, and anything still sounding is released on the way out.
+    #[test]
+    fn test_run_exits_when_its_commands_close() {
+        let (commands, rx_command) = sync_channel();
+        let (tx_step, _steps) = watch::channel(0);
+        let sink = RecordingSink::new();
+        let engine = PlaybackEngine::with_clock(
+            rx_command,
+            tx_step,
+            Box::new(sink.clone()),
+            ManualClock::new(),
+        );
+
+        commands
+            .send(PlaybackCommand::LoadSequence(sequence(&[60])))
+            .unwrap();
+        drop(commands);
+
+        // Terminates: with no senders left the wait returns Shutdown.
+        engine.run();
+
+        assert!(!sink.is_empty(), "the release burst should have been sent");
     }
 }

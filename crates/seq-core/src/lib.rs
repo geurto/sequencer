@@ -36,5 +36,5 @@ pub use note::{
 };
 #[cfg(any(test, feature = "test-util"))]
 pub use sink::RecordingSink;
-pub use sink::{MidiSink, SendError};
+pub use sink::{MidiSink, SendError, SilentSink};
 pub use transport::Transport;

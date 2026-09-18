@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/seq-core"]
+members = ["crates/seq-core", "crates/seq-ui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -37,7 +37,6 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow = "1.0.86"
-device_query = "2.1.0"
 env_logger = "0.11.3"
 iced = { version = "0.13.1", features = ["advanced", "canvas", "tokio"] }
 iced_futures = "0.13.2"
@@ -45,6 +44,7 @@ log = "0.4.22"
 midir = "0.11.0"
 rand = "0.9.1"
 seq-core = { path = "crates/seq-core", features = ["std"] }
+seq-ui = { path = "crates/seq-ui" }
 tokio = { version = "1.36.0", features = ["full"] }
 
 [dev-dependencies]

@@ -2,23 +2,35 @@
 
 Audit date: 2026-09-17 · Last code commit: 2026-05-09 (`5a91ae2`) · Toolchain used: rustc 1.91.1
 
-Scope: (A) bringing the Rust up to date, (B) running headless on bare-metal MCUs such as ESP32,
-(C) accepting `Sequence`s from an external autoregressive model. GUI code is excluded from
-recommendations but is referenced where it constrains the architecture.
+Scope: (A) bringing the Rust up to date, (B) running on bare-metal MCUs such as ESP32,
+(C) accepting `Sequence`s from an external autoregressive model, (D) the user interface.
+
+> **Amended 2026-09-18 — Part D is new, and it reorders the remaining work.**
+>
+> The original audit excluded GUI code from its recommendations and assumed `iced` would stay. That
+> assumption is withdrawn. The decision to replace `iced` with a shared `no_std` renderer
+> (`embedded-graphics`, drawing to a simulator window on desktop and to an SPI panel on the MCU)
+> turns the UI from a *consumer* of the architecture into a *load-bearing part* of it: the snapshot
+> type the UI renders and the event type it emits are the same two types §A2 needs for its `watch`
+> channel and §A3 needs to replace `device_query`.
+>
+> Consequence: the UI types must be defined **before** the concurrency rewrite, not after it.
+> See §D and the revised order of work. Parts B and C are substantively unaffected — §B3, §B6 and
+> §B8 gain a crate and two rows; Part C is untouched.
 
 ---
 
 > ### ⚠️ Implementation status — read this first
 >
-> **Roadmap steps 1–4 have been implemented** — §A1 bugs, §A5 manifest, §A6 tooling, §A7
-> testability, §A4 edition 2024, and §B3's workspace split with a `no_std` `seq-core` (including
-> §A2.5's integer timing). Those sections describe the code *as audited*, and are kept because they
-> explain why each fix looks the way it does — but they no longer describe the current tree. Do not
-> re-fix them.
+> **Roadmap steps 1–6 have been implemented** — §A1 bugs, §A5 manifest, §A6 tooling, §A7
+> testability, §A4 edition 2024, §B3's workspace split with a `no_std` `seq-core` (including
+> §A2.5's integer timing), §D2's UI seam, and §A2/§A3's concurrency and input rewrite. Those
+> sections describe the code *as audited*, and are kept because they explain why each fix looks the
+> way it does — but they no longer describe the current tree. Do not re-fix them.
 >
-> Still outstanding: **§A2** (the polling concurrency model — the loops still poll; only the
-> `f64` timing part of §A2 is done), **§A3** (the desktop binary still uses `device_query`), and
-> Part B's actual ESP32 binary plus all of **Part C**. Those are the live work items.
+> Still outstanding: **§D2–D3** (the `embedded-graphics` renderer itself — the *types* landed in
+> step 5, the drawing has not), **deleting `iced`**, Part B's actual ESP32 binary, and all of
+> **Part C**. Those are the live work items.
 >
 > Step 1 landed the three mixer bugs, the silent-startup bug, the A1.5 list, unused-dependency
 > removal, `rust-version = "1.87"` (verified against a real 1.87.0 toolchain), a release profile,
@@ -63,8 +75,11 @@ reports 117.
    `rustfmt.toml` that emits ~30 warnings per run, and a broken Dockerfile with a committed root
    password (§A5, §A6).
 
-Points 3 is the load-bearing one: the fix for it (a `no_std` core crate) is simultaneously the
+Point 3 is the load-bearing one: the fix for it (a `no_std` core crate) is simultaneously the
 ESP32 story *and* the external-model story. Do that refactor once and B and C both fall out.
+
+*Amended 2026-09-18:* and the UI story. `seq-core` landed in step 4; Part D applies the same move one
+layer up, and D, B and C then share a single set of platform-independent types.
 
 ---
 
@@ -206,13 +221,21 @@ Recommended replacement:
    command sender and a `tokio::sync::watch::Receiver<StateSnapshot>`. `watch` is exactly right for
    UI updates — it's lossy by design, so a slow GUI can't back-pressure the sequencer. This removes
    the `RwLock` and all "diff my copy against the shared copy" polling.
+
+   **Amended (Part D):** `StateSnapshot` is `seq_ui::UiSnapshot` — a flat, `Copy`, `no_std` type
+   defined in §D2, not a renamed `SharedState`. Define it first (§D1) so this step lands against the
+   final type instead of one that gets rewritten when the renderer arrives. On the MCU the same
+   snapshot goes through `embassy_sync::Signal`, which is `watch` with a different spelling (§B4).
 2. **`tokio::select!` instead of `try_recv` loops.** Every one of the loops above becomes
    `loop { tokio::select! { Some(cmd) = rx_cmd.recv() => …, Some(seq) = rx_seq.recv() => …, } }`.
    Zero idle CPU.
 3. **Delete the `Arc<Mutex<Option<iced::futures::channel::mpsc::Sender<GuiMessage>>>>`**
-   (`main.rs:39`, `playback/mod.rs:30`). That triple-wrapper exists only because the GUI's sender
-   isn't available until `iced` starts. With `watch`, the GUI subscribes when it's ready and the
-   producer never needs to know.
+   (`main.rs:42-44`, `playback/mod.rs:37-39`). That triple-wrapper exists only because the GUI's
+   sender isn't available until `iced` starts. With `watch`, the GUI subscribes when it's ready and
+   the producer never needs to know. The `Connected`/`Disconnected` handshake in `gui/state.rs:30-50`
+   exists for the same reason and dies with it. Under Part D the wrapper doesn't merely lose its
+   `Arc<Mutex<Option<_>>>` — the `iced` type disappears from the workspace entirely, and with it the
+   reason `playback` currently cannot build without a GPU stack.
 4. **Event-driven scheduling instead of a 1 ms tick.** The engine already knows the tick of the next
    event; sleep until exactly then rather than waking 1000×/s. On desktop keep a dedicated OS thread
    with `Instant`-based sleep (coarse sleep to ~1 ms out, then spin) — `tokio::time` is not
@@ -232,9 +255,11 @@ Recommended replacement:
 
 | Coupling | Where | Why it's a problem | Replacement |
 |---|---|---|---|
-| `device_query` polled inside the playback thread | `engine.rs:59, 116` | It's a **global X11 keyboard grab**. Requires a display server, works only when a window has focus, does a server round-trip at 1 kHz, and reads every keystroke the user types anywhere. Total blocker for headless. | Input as a *message source*: `crossterm` for a TUI, MIDI CC / Note-In for hardware controllers, GPIO for embedded. |
+| `device_query` polled inside the playback thread | `engine.rs:59, 116` | It's a **global X11 keyboard grab**. Requires a display server, works only when a window has focus, does a server round-trip at 1 kHz, and reads every keystroke the user types anywhere. Total blocker for headless. | Input as a *message source* producing `seq_ui::ControlEvent` (§D2): simulator key events on desktop, GPIO encoders on the MCU, MIDI CC / Note-In on both. ~~`crossterm` for a TUI~~ — superseded by Part D; there is no TUI. |
+| `device_query::Keycode` in the playback *protocol* | `playback/state.rs:47` (`PlaybackStatus::InputChanged(Vec<Keycode>)`) | Not just an input-device dependency — the key type is baked into the status enum the engine sends back, so every consumer inherits X11. Missed by the original table. | Same `ControlEvent`. The engine reports *what changed musically*, never which key was pressed. |
 | `midir` in the engine | `engine.rs:19` | ALSA/CoreMIDI/WinMM only. | A `MidiSink` trait (§B3). `midir` is one impl; a raw-UART writer is another and works on both Pi and ESP32. |
-| `iced` types in non-GUI modules | `playback/mod.rs:31`, `playback/state.rs` via `SharedState` | The playback layer imports `iced::futures::channel::mpsc`, so `playback` cannot build without a GUI stack. | `watch` channel of a plain snapshot type. |
+| `iced` types in non-GUI modules | `playback/mod.rs:37-39`, `playback/state.rs` via `SharedState` | The playback layer imports `iced::futures::channel::mpsc`, so `playback` cannot build without a GUI stack. | `tokio::sync::watch<seq_ui::UiSnapshot>` (§D2). Under Part D the dependency is deleted rather than abstracted. |
+| `SharedState` as the render input | `playback/state.rs:57` | It drags `EuclideanSequencerState`, `MixerState` and `SequencerSlot` into every view function, so the UI can only be written against desktop types. | Flatten into `seq_ui::UiSnapshot` (§D2). `SharedState` stays as the owner's internal working state; the snapshot is what leaves the owner. |
 | `tokio` in the sequencers/mixer | throughout | `tokio` is `std`-only. | Make the generators synchronous and pure (§B3). Async belongs at the I/O edge. |
 | `log`/`env_logger` in core | throughout | `env_logger` is `std`. `log` itself is fine. | Keep the `log` facade in core; choose the backend per binary (`tracing-subscriber` on desktop, `defmt`/`esp-println` on MCU). |
 | `anyhow` in library code | `playback/`, `midi.rs` | Opaque errors in a library; `std` by default. | `thiserror` 2.0 enums in the library (works on `no_std` via `core::error::Error`, stable since 1.81); keep `anyhow` in `main.rs` only. |
@@ -428,10 +453,15 @@ sequencer/
 │   │   ├── engine.rs          #   tick-driven state machine: (tick) -> &[MidiEvent]
 │   │   └── source.rs          #   trait SequenceSource  ← Part C hooks here
 │   ├── seq-io/                # #![no_std] traits: MidiSink, Clock, ControlInput, Transport
+│   ├── seq-ui/                # #![no_std], no alloc. UiSnapshot, ControlEvent, render()  ← §D
 │   ├── seq-proto/             # #![no_std] + serde wire types (Part C), heapless/alloc feature-gated
-│   ├── sequencer-desktop/     # std bin: midir + tokio + iced + serialport
-│   └── sequencer-esp/         # no_std bin: esp-hal + embassy + UART MIDI + WiFi
+│   ├── sequencer-desktop/     # std bin: midir + tokio + eg-simulator + serialport
+│   └── sequencer-esp/         # no_std bin: esp-hal + embassy + UART MIDI + SPI panel + WiFi
 ```
+
+*(Amended by Part D: `seq-ui` is new, and the desktop binary's `iced` became
+`embedded-graphics-simulator`. `seq-ui` follows the same rules as `seq-core` below — `no_std`,
+allocation-free, no I/O — so rule 4's "only crate with interesting logic" is now two crates.)*
 
 The rules that make this work:
 
@@ -483,6 +513,7 @@ note.
 | `log` + `env_logger` | `log` + `esp-println` 0.18, or `defmt` | Keep the `log` facade in core so both work. |
 | `device_query` | GPIO + rotary encoders, or MIDI-In CC | See §B6. |
 | `serde_json` | `postcard` 1.1 / `serde-json-core` 0.6 | Part C. |
+| `iced` | **none — same crate both sides** | `embedded-graphics` 0.8.2 is already `no_std`. The desktop swaps in `embedded-graphics-simulator` 0.8 as the `DrawTarget`, the MCU swaps in `ssd1306` 0.10 or `mipidsi` 0.10. `seq-ui` itself is identical. See §D. |
 
 ### B5. MIDI output on the ESP32
 
@@ -503,7 +534,7 @@ the transmit time above means there's no point chasing better than that.
 
 ### B6. Input without a keyboard
 
-`device_query` has to go regardless (§A3). For a headless box the natural inputs are:
+`device_query` has to go regardless (§A3). For a box with no keyboard the natural inputs are:
 
 - **Rotary encoders + buttons on GPIO**, debounced, read via `embassy-time` or PCNT. Maps 1:1 onto
   the existing key semantics (steps/pulses/phase/pitch per slot).
@@ -512,7 +543,14 @@ the transmit time above means there's no point chasing better than that.
 - **WiFi/BLE control** — reuse the Part C transport for parameter changes, not just patterns.
 
 Model all three as `enum ControlEvent { … }` feeding one command channel. That's the same enum the
-desktop TUI produces, so the core never learns where input came from.
+desktop produces, so the core never learns where input came from.
+
+**Amended (Part D).** `ControlEvent` is no longer an embedded-only idea to be designed later — it
+lives in `seq-ui` (§D2), it is what the desktop simulator's key handler emits, and it ships in the
+step that precedes the concurrency rewrite. By the time `sequencer-esp` exists, the enum and every
+consumer of it have been in use on desktop for three steps; the GPIO encoder work is then only a
+matter of producing events that already have meaning. Note the original sentence said "the desktop
+TUI" — there is no TUI; that option was considered and rejected in §D1.
 
 ### B7. Also worth adding while you're in there: MIDI clock
 
@@ -534,11 +572,18 @@ this was already the plan.
 | Wire RX/TX buffers | ~2 KB |
 | Sounding-note tracking, engine state | < 1 KB |
 | embassy executor + 4 task stacks | ~16 KB |
-| **Subtotal, no WiFi** | **~25 KB** |
+| Framebuffer, 128×64 mono (§D3) | 1 KB |
+| **Subtotal, no WiFi** | **~26 KB** |
 | `esp-wifi` + `embassy-net` (if used) | ~60–80 KB |
 
 Firmware size lands around 200–400 KB of 4 MB. There is no resource problem here — the constraint is
 architectural, not physical.
+
+**Amended (Part D) — the panel is the one line item that can actually move this.** A 128×64
+`BinaryColor` framebuffer is 1 KB and rounds to nothing. A 240×135 RGB565 panel is **64.8 KB** — an
+eighth of SRAM, and the single largest allocation in the firmware. If you go colour, either draw in
+horizontal bands (`embedded-graphics` supports partial `DrawTarget` regions, so `seq-ui` needs no
+changes) or accept the cost. This is a reason to prefer mono unless colour earns its keep; see §D3.
 
 ---
 
@@ -720,7 +765,141 @@ transformer three hops away. That's the whole point.
 
 ---
 
+## Part D — The user interface
+
+*Added 2026-09-18. The original audit put GUI code out of scope. That was defensible while `iced`
+was assumed to stay; it isn't once the MCU grows a screen, because the UI then owns two types that
+the rest of the architecture has to agree on.*
+
+### D1. Decision: replace `iced` with `embedded-graphics`
+
+**Decision.** One renderer, in a `no_std` `seq-ui` crate, drawn with `embedded-graphics` 0.8.2. It
+targets an `embedded-graphics-simulator` 0.8 window on desktop and an SPI panel on the MCU. Both
+render the same code to the same resolution and produce the same pixels — the desktop window is a
+magnified render of the real panel, not a resizable desktop layout.
+
+This follows from two facts about the project as it now stands: the ESP32 build will have a small
+OLED/LCD, and the desktop build exists to develop for it. Given both, a shared renderer is the only
+arrangement where the desktop is actually a harness rather than a second product.
+
+**Why `iced` can't stay.** It cannot run on an ESP32-C6 in any configuration — both renderers (wgpu
+and tiny-skia) need `std`, an allocator and a windowing system. So the MCU is not an argument for
+keeping it; at best it's neutral. What settles it is the cost already visible in the tree:
+
+- `flake.nix` carries ~15 native deps and an EGL ICD workaround (commit `5a91ae2`) that exists only
+  to make `iced` find Mesa under Nix.
+- `docker/sequencer/Dockerfile` refuses to build in-image because "compiling the iced dependency tree
+  takes long enough to be impractical" under QEMU — on arm64, i.e. the Raspberry Pi this is for.
+- ~49 of 530 lockfile crates are the winit/wgpu/cosmic-text stack.
+- It isn't even earning that: `gui/sequencers/euclidean.rs:74-177` is a raw `canvas::Program` doing
+  manual primitive drawing. Only the mixer slider (`gui/mixer.rs`) and the MIDI `pick_list`
+  (`gui/midi.rs`) use real widgets, ~150 lines of ~700.
+
+**Why not a TUI (`ratatui` 0.30).** Considered seriously, and it wins on pragmatics — no native deps,
+builds in seconds under QEMU, works over SSH, and a step grid maps fine to half-blocks. Rejected
+because it shares nothing with the panel: the OLED renderer would be written separately and drift.
+It would be the right answer if the ESP32 build were headless, or if the Pi-over-SSH experience were
+the product. Neither is the case. **Revisit only if the panel is dropped.**
+
+**The part that isn't about aesthetics.** A `render(&UiSnapshot, &mut impl DrawTarget)` over an
+in-memory framebuffer is testable: golden-frame comparison in CI, no display, no GPU, no window,
+milliseconds. There is no equivalent for the current GUI — which is why `src/gui/` contributes 0 of
+the 63 tests.
+
+### D2. The crate
+
+```
+crates/seq-ui/          # #![no_std], no alloc, no I/O, no async
+├── snapshot.rs         #   UiSnapshot   — flat, Copy render input
+├── control.rs          #   ControlEvent — flat input output
+├── layout.rs           #   const geometry, parameterised by panel size
+└── render.rs           #   fn render<D: DrawTarget<Color = BinaryColor>>(&UiSnapshot, &mut D)
+```
+
+Dependencies: `embedded-graphics`, `seq-core`. Nothing else. Same workspace lints, same `no_std`
+proof via the existing `riscv32imc` target check in `flake.nix:30-33`. Add `u8g2-fonts` 0.8 if the
+built-in `mono_font` set proves too coarse for the parameter readout.
+
+The two types are the whole reason this section precedes §A2:
+
+```rust
+/// What the renderer needs and nothing else. No desktop types, no Arc, no Vec.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UiSnapshot {
+    pub playing: bool,
+    pub bpm_milli: u32,          // integer, per §A2.5 — no FPU on the C6
+    pub midi_channel: u8,
+    pub active: Slot,
+    pub step_index: u8,
+    pub slots: [SlotSnapshot; 2],
+    pub mix: u8,                 // 0..=255, not f32
+}
+
+/// What the core accepts. Produced by simulator keys, GPIO encoders, or MIDI CC
+/// — the core never learns which (§B6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControlEvent {
+    TogglePlay, NextSlot, CycleMidiChannel,
+    Bpm(i16), Steps(i8), Pulses(i8), Phase(i8), Pitch(i8), Mix(i8),
+}
+```
+
+`UiSnapshot` is the payload of §A2's `watch` channel (and of `embassy_sync::Signal` on the MCU).
+`ControlEvent` is §A3's replacement for both `device_query` leaks. Defining them is a day's work and
+it is *not* rendering work — which is why it splits out as its own step.
+
+### D3. Panel geometry — decide this before writing `layout.rs`
+
+This is a hardware decision that constrains every UI choice downstream, and it's cheap to get right
+now and expensive to change later. A 128×64 mono SSD1306 over SPI is the recommended default; it
+fits the intended layout, and §B8 shows it costs 1 KB of SRAM against a colour panel's 64.8 KB.
+
+```
+┌────────────────────────────────────────┐ 128×64, BinaryColor
+│ ▶ 120.0  CH1                           │  transport line, 8px
+│ ●·●·●·●·●·●·●·●·  ← slot L, 16 steps   │  7px, 7px pitch = 112px
+│ ●··●··●··●··●··●  ← slot R             │  7px
+│                                        │
+│ STEPS 16   PULSE 5   PHASE 0           │  active slot's params
+│ NOTE  C3   MIX ▓▓▓▓▓▓░░░░              │
+└────────────────────────────────────────┘
+```
+
+Two consequences worth recording:
+
+- **The 4×4 grid becomes one row of 16.** `gui/sequencers/euclidean.rs:108-140` draws a 4×4 grid over
+  what is a 16-step linear pattern; the row is both more Elektron and more honest about the data.
+- **The help text doesn't exist on the device.** `gui/mod.rs:187-227` is a desktop-only affordance,
+  and dropping it recovers most of the layout budget.
+
+Panel notes: use **SPI, not I²C** — a full 1 KB frame at 400 kHz I²C is ~20 ms, survivable against
+125 ms/step at 120 BPM but with no headroom. Redraw at step rate and on parameter change, not on a
+free-running frame loop. If colour is wanted later, a 240×135 ST7789 via `mipidsi` 0.10 is the same
+`DrawTarget` trait — only `layout.rs`'s constants change — but read the §B8 amendment first.
+
+### D4. What is actually lost
+
+Honest accounting, so this isn't discovered mid-migration:
+
+| Lost | Replacement | Cost |
+|---|---|---|
+| `pick_list` for MIDI port selection (`gui/midi.rs:16-21`) | A scrolling list driven by `ControlEvent` | ~40 lines. Needed for the hardware anyway. |
+| `slider` for the mixer (`gui/mixer.rs:16-59`) | A drawn bar + `ControlEvent::Mix` | Trivial; the keyboard already drives it (`R`/`F`). |
+| Antialiased scalable text | Bitmap mono fonts | For this aesthetic, a feature. |
+| Layout engine, widget tree, theming | `layout.rs` consts | You are drawing a fixed 128×64 panel. There is no layout problem to solve. |
+| Mouse input | Keys / encoders | The app is already keyboard-driven end to end. |
+
+`embedded-graphics-simulator` pulls SDL2 — one native dep replacing the X11 + Wayland + Mesa + Vulkan
++ EGL set in `flake.nix`, and it has a non-SDL mode that writes frames to PNG for headless CI.
+
+---
+
 ## Suggested order of work
+
+*Revised 2026-09-18 for Part D. What changed: the old step 5 (§A2 concurrency) has been split, with
+the UI seam pulled in front of it and the renderer and the `iced` deletion following it. Old steps
+6–8 keep their content and shift to 9–11. The old list also numbered two consecutive items "4"; that
+is fixed here.*
 
 Each step is independently shippable and leaves the tree working.
 
@@ -728,18 +907,98 @@ Each step is independently shippable and leaves the tree working.
 2. ~~**Testability** (§A7).~~ **Done** — see §Changelog.
 3. ~~**Edition 2024 + `[lints]`** (§A4).~~ **Done** — see §Changelog.
 4. ~~**Workspace split, extract `seq-core` as `no_std`** (§B3).~~ **Done** — see §Changelog.
-4. **Workspace split, extract `seq-core` as `no_std`** (§B3). The big one. Integer timing (§A2.5),
-   fixed-capacity `Pattern`, synchronous pure generators. Desktop binary keeps working throughout.
-5. **Replace the concurrency model** (§A2). `watch` + `select!`, delete the polling loops and the
-   `Arc<Mutex<Option<Sender>>>`. Drop `device_query`.
-6. **`seq-proto` + `SequenceSource` + lookahead/fallback** (§C1–C3), with a mock source first, then a
-   real TCP one against a Python stub. Part C is now done on desktop.
-7. **`sequencer-esp`** (§B). Blink → UART MIDI out → Euclidean standalone → GPIO input → WiFi remote
-   source. Each stage is a working instrument.
-8. **MIDI clock in/out** (§B7), on-device `MarkovSource` (§C4), then the real model.
+5. ~~**The UI seam — types only** (§D2).~~ **Done** — see §Changelog.
+6. ~~**Replace the concurrency model** (§A2, §A3).~~ **Done** — see §Changelog.
+7. **The renderer** (§D2–D3). `render()` on `embedded-graphics`, the simulator binary, `layout.rs`
+   for the chosen panel, and golden-frame tests. Runs beside `iced` behind a feature flag, so the two
+   can be compared side by side.
+8. **Delete `iced`.** ~700 lines of `src/gui/`, 49 lockfile crates, most of `nativeDeps` in
+   `flake.nix` including the EGL workaround, and the arm64 Dockerfile's "don't build here" caveat.
+9. **`seq-proto` + `SequenceSource` + lookahead/fallback** (§C1–C3), with a mock source first, then a
+   real TCP one against a Python stub. Part C is now done on desktop. *(Unchanged; was step 6.)*
+10. **`sequencer-esp`** (§B). Blink → UART MIDI out → **panel bring-up** → Euclidean standalone →
+    GPIO encoders → WiFi remote source. Each stage is a working instrument. *(Was step 7; panel
+    bring-up is new, and it is only a `DrawTarget` impl — `seq-ui` ships unchanged from step 7.)*
+11. **MIDI clock in/out** (§B7), on-device `MarkovSource` (§C4), then the real model. *(Was step 8.)*
 
-Steps 1–3 are a weekend. Step 4 is the real investment, and it's the one that makes 6, 7 and 8
-straightforward instead of painful.
+**Decision gate before step 7:** pick the panel (§D3). It sets `layout.rs`'s constants and the §B8
+RAM budget, and it's a hardware purchase, not a code change.
+
+Step 4 was the real investment and it is done; it is what makes 9, 10 and 11 straightforward instead
+of painful. Steps 5–8 are the UI swap, and their ordering is the whole point: **types, then
+concurrency, then pixels, then deletion.** Doing the renderer before the concurrency rewrite would
+mean building a UI against the `Arc<Mutex<Option<Sender>>>` it exists to remove; doing the
+concurrency rewrite before the types would mean picking a snapshot type twice.
+
+---
+
+## Changelog — roadmap steps 5 and 6 (implemented)
+
+### Step 5: the UI seam (§D2)
+
+`crates/seq-ui` — `no_std`, allocation-free, no rendering — holds the two types the rest of the
+architecture has to agree on:
+
+- **`UiSnapshot`** — flat, `Copy`, integer-only (no `f32`: the target MCU has no FPU). Carries the
+  transport line, both slots and the mix position. Struck steps travel as a `u64` bitmask
+  (`SlotSnapshot::hits`) rather than being recomputed by the renderer, so the display cannot
+  disagree with what plays once Part C's external sources produce non-Euclidean patterns.
+- **`ControlEvent`** — one user intention, surface-agnostic. Parameter changes are *deltas*
+  (`Pitch(i8)`, `Bpm(i16)`, …) because every intended input is relative: a key is ±1, an encoder
+  detent is ±1, a MIDI CC arrives as a change.
+
+The `iced` GUI now renders from `UiSnapshot` — the euclidean view's duplicated Bresenham is gone,
+it reads `hits` — and `seq-ui` is in the bare-metal CI job alongside `seq-core`.
+
+### Step 6: the concurrency and input rewrite (§A2, §A3)
+
+**Four polling tasks became one.** Two generator tasks, the mixer task and the playback handler each
+woke every 10 ms to diff an `Arc<RwLock<SharedState>>`. They existed only because state was shared
+and nobody was notified of changes. With a single owner (`src/sequencer.rs`) a change is *known*
+rather than discovered: a `ControlEvent` arrives, the state applies it, only the invalidated work is
+redone, and a fresh snapshot is published. `src/mixer/` and `src/sequencers/` are deleted outright —
+generation and mixing were already pure functions in `seq-core`; those modules were nothing but the
+polling wrappers.
+
+**Nothing polls any more.** The task is a `tokio::select!` over three inputs. The engine thread's
+1 ms tick is gone too: it asks the transport when it next needs attention
+(`Transport::time_to_next_wakeup_us`, new in `seq-core`) and blocks on its command channel until
+then, so a *paused* sequencer costs nothing and a playing one wakes once per event rather than a
+thousand times a second. It sleeps coarsely to within 1.5 ms of the deadline and spins the rest,
+because `recv_timeout` is only as punctual as the scheduler and a late wakeup is a late note —
+jitter is better than the old 1 ms poll, not merely cheaper.
+
+**`device_query` is gone** (§A3), with its global X11 keyboard grab. Keys come from the window via
+iced's `on_key_press`, so the app only responds when focused and reads nothing system-wide. The
+engine no longer reads the keyboard at all; `PlaybackStatus::InputChanged(Vec<Keycode>)` and the
+whole `PlaybackStatus` enum are deleted, and playback starts via `PlaybackCommand::SetPlaying`.
+The key→`ControlEvent` map is ~25 lines and is the only part of this that step 8 rewrites for the
+simulator.
+
+**The `Arc<Mutex<Option<Sender>>>` and its `Connected`/`Disconnected` handshake are gone**, replaced
+by `watch<UiSnapshot>`. Lossy-latest is the right semantics: a slow window renders the newest frame
+instead of back-pressuring playback. The play head travels engine → task the same way.
+
+A real bug surfaced while testing shutdown, and it is worth recording because it is a `select!`
+footgun rather than a typo: **a closed channel is permanently ready**, so a dead input wins the race
+every iteration and starves the live ones. The first version shut the task down the moment its MIDI
+channel closed — and had the control channel outlived it, the task would have spun at 100% CPU.
+Secondary inputs are now retired as they close (`if midi_open` branch preconditions), and only the
+control channel closing ends the task. `test_a_closed_input_does_not_starve_the_others` pins it, and
+was tightened until it *deterministically* fails against the bug: the first event is awaited before
+the second is sent, so by the second the closed channel is the only ready branch.
+
+### Verification
+
+95 tests (up from 82) plus 2 doctests, clippy pedantic `-D warnings` clean across all three crates,
+`seq-core` + `seq-ui` still build for `riscv32imc-unknown-none-elf` with no default features.
+`cargo tree` confirms `device_query` has left the dependency graph.
+
+**Environment note:** this shell has two `alsa-lib` versions on `LD_LIBRARY_PATH`, and the system
+one (1.2.15.3, built against glibc 2.42) shadows the flake's 1.2.14, dragging a mismatched
+`libpthread` into the desktop test binary. It is unrelated to these changes — `seq-core` and
+`seq-ui` tests are unaffected — but the desktop tests need the stale entry dropped from the path to
+run. Worth fixing in `flake.nix` separately.
 
 ---
 

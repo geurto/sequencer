@@ -1,111 +1,73 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use env_logger::Builder;
-use log::{error, info};
-use seq_core::{Pattern, PolyphonicSequence};
-use std::{
-    sync::{Arc, Mutex as SyncMutex, mpsc::channel as sync_channel},
-    thread,
-};
-use tokio::sync::mpsc;
-use tokio::{signal, sync::RwLock};
+use log::{error, info, warn};
+use seq_ui::{ControlEvent, Slot};
+use std::{sync::mpsc::channel as sync_channel, thread};
+use tokio::signal;
+use tokio::sync::{mpsc, watch};
 
 use sequencer::{
-    EuclideanSequencer, Gui, MidiCommand, Mixer, PlaybackEngine,
-    PlaybackHandler, PlaybackStatus,
-    gui::{sequencers::euclidean::Gui as EuclideanGui, state::GuiMessage},
-    midi_utils,
-    playback::midi::MidirSink,
-    playback::state::{SequencerSlot, SharedState},
+    Gui, MidiCommand, MidirSink, PlaybackEngine, Sequencer, SequencerState,
+    gui::sequencers::euclidean::Gui as EuclideanGui, midi_utils,
+    playback::state::PlaybackCommand,
 };
+
+/// Plenty for a human at a keyboard; input is never allowed to block.
+const CONTROL_CAPACITY: usize = 64;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     Builder::new().filter(None, log::LevelFilter::Info).init();
 
-    // patterns FROM sequencers TO mixer
-    let (tx_pattern, rx_pattern) =
-        mpsc::channel::<(Option<Pattern>, Option<Pattern>)>(1);
+    // User intentions, from any input surface to the sequencer task.
+    let (tx_control, rx_control) =
+        mpsc::channel::<ControlEvent>(CONTROL_CAPACITY);
 
-    // mixed sequence FROM mixer TO playback_handler
-    let (tx_mixed_sequence, rx_mixed_sequence) =
-        mpsc::channel::<Box<PolyphonicSequence>>(1);
+    // MIDI port queries from the window.
+    let (tx_midi, rx_midi) = mpsc::channel::<MidiCommand>(8);
 
-    // MIDI messages, either GUI or playing a note
-    let (tx_midi, rx_midi) = mpsc::channel::<MidiCommand>(1);
+    // Commands to the synchronous playback thread.
+    let (tx_playback, rx_playback) = sync_channel::<PlaybackCommand>();
 
-    // synchronous playback commands & status
-    let (tx_playback_cmd, rx_playback_cmd) = sync_channel();
-    let (tx_playback_status, rx_playback_status) =
-        mpsc::unbounded_channel::<PlaybackStatus>();
+    // The play head, engine -> sequencer task. Lossy-latest: a missed step
+    // should be skipped, not queued.
+    let (tx_step, rx_step) = watch::channel(0usize);
 
-    // state updates to GUI
-    let tx_gui: Arc<
-        SyncMutex<Option<iced::futures::channel::mpsc::Sender<GuiMessage>>>,
-    > = Arc::new(SyncMutex::new(None));
+    // The frame the UI renders, sequencer task -> window.
+    let state = SequencerState::default();
+    let (tx_snapshot, rx_snapshot) = watch::channel(state.ui_snapshot());
 
-    // shared state which is read by multiple structs
-    let shared_state: Arc<RwLock<SharedState>> =
-        Arc::new(RwLock::new(SharedState::new(120.)));
-
-    // Sequencers and mixer. Each sequencer emits its opening pattern as soon
-    // as it starts running, so there is nothing to prime here.
-    let mut sequencer_a = EuclideanSequencer::new(
-        SequencerSlot::Left,
-        shared_state.clone(),
-        tx_pattern.clone(),
-    );
-    tokio::spawn(async move {
-        sequencer_a.run().await;
-    });
-
-    // both Euclidean for now to keep it simple
-    let mut sequencer_b = EuclideanSequencer::new(
-        SequencerSlot::Right,
-        shared_state.clone(),
-        tx_pattern.clone(),
-    );
-    tokio::spawn(async move { sequencer_b.run().await });
-
-    let mut sequence_mixer =
-        Mixer::new(shared_state.clone(), rx_pattern, tx_mixed_sequence);
-    tokio::spawn(async move { sequence_mixer.run().await });
-
-    // Playback
-    let midi_ports = midi_utils::list_ports()?;
-    let out_port = midi_ports.first().ok_or_else(|| {
-        anyhow!(
-            "No MIDI output ports found. Start a synthesiser (e.g. FluidSynth) \
-             or connect a MIDI device, then run the sequencer again."
-        )
-    })?;
-    info!("Connecting to MIDI output port {out_port}");
-    let midi_conn = midi_utils::create_connection(out_port)?;
-
-    // Link between async GUI and sync playback engine
-    let tx_gui_playback = tx_gui.clone();
-    let mut playback_handler = PlaybackHandler::new(
-        shared_state.clone(),
+    // The one owner of the sequencer's state. Everything else talks to it
+    // through the channels above; nothing polls and nothing shares a lock.
+    let mut sequencer = Sequencer::new(
+        state,
+        rx_control,
         rx_midi,
-        rx_mixed_sequence,
-        tx_playback_cmd,
-        rx_playback_status,
-        tx_gui_playback,
+        rx_step,
+        tx_playback.clone(),
+        tx_snapshot,
     );
-    tokio::spawn(async move { playback_handler.run().await });
+    tokio::spawn(async move { sequencer.run().await });
 
-    // Synchronous playback engine that handles MIDI control
-    let playback_engine = PlaybackEngine::new(
-        rx_playback_cmd,
-        tx_playback_status,
-        Box::new(MidirSink(midi_conn)),
-    );
-    thread::spawn(move || {
-        playback_engine.run();
-    });
+    // Playback. Starting without a port is not fatal — the window can pick one
+    // later — so a missing device only costs a warning.
+    let sink: sequencer::playback::engine::BoxedSink = match open_first_port() {
+        Ok(connection) => Box::new(MidirSink(connection)),
+        Err(e) => {
+            warn!(
+                "Starting without MIDI output: {e}. \
+                 Pick a port in the window once one is available."
+            );
+            Box::new(seq_core::SilentSink)
+        }
+    };
 
-    // Shutdown. This has to be installed *before* the GUI takes over the
-    // calling thread: spawning it afterwards means it only starts once the
-    // window has already closed and main is about to return anyway.
+    let playback_engine = PlaybackEngine::new(rx_playback, tx_step, sink);
+    thread::spawn(move || playback_engine.run());
+
+    // Shutdown. Installed before the window takes over the calling thread:
+    // spawning it afterwards means it only starts once the window has already
+    // closed and main is about to return anyway.
     tokio::spawn(async move {
         if let Err(e) = signal::ctrl_c().await {
             error!("Failed to install Ctrl+C handler: {e}");
@@ -115,16 +77,25 @@ async fn main() -> Result<()> {
         std::process::exit(0);
     });
 
-    // GUI
-    let gui_sequencer_left = EuclideanGui::new(SequencerSlot::Left);
-    let gui_sequencer_right = EuclideanGui::new(SequencerSlot::Right);
-
     Gui::run(
-        tx_gui.clone(),
+        rx_snapshot,
+        tx_control,
         tx_midi,
-        gui_sequencer_left,
-        gui_sequencer_right,
+        EuclideanGui::new(Slot::Left),
+        EuclideanGui::new(Slot::Right),
     )?;
 
     Ok(())
+}
+
+fn open_first_port() -> Result<midir::MidiOutputConnection> {
+    let ports = midi_utils::list_ports()?;
+    let port = ports.first().ok_or_else(|| {
+        anyhow::anyhow!(
+            "no MIDI output ports found (start a synthesiser such as FluidSynth, \
+             or connect a device)"
+        )
+    })?;
+    info!("Connecting to MIDI output port {port}");
+    midi_utils::create_connection(port)
 }
